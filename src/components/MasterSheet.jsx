@@ -131,7 +131,7 @@ const ProductCatalogPage = () => {
   }, []);
 
   // =========================================================
-  // 🔄 DATA PIVOT SYSTEM (Maintained Exactly As Original)
+  // 🔄 DATA PIVOT SYSTEM (Unit Conversion for Decorative)
   // =========================================================
   const structuredMatrices = useMemo(() => {
     const initialStructure = {
@@ -167,8 +167,19 @@ const ProductCatalogPage = () => {
       }
 
       const brandName = extractBaseBrandName(item.sku);
-      const rawSize = (item.size || '').trim().toLowerCase();
-      const isMultiSizeTable = categoryKey === 'PW' || categoryKey === 'BB';
+      let rawSize = (item.size || '').trim();
+
+      const isMultiSizeTable = categoryKey === 'PW' || categoryKey === 'BB' || categoryKey === 'DECORATIVE';
+
+      // Unit replacement: converts '32 mm' -> '32 sq feet', '40 mm' -> '40 sq feet', etc.
+      if (categoryKey === 'DECORATIVE') {
+        if (rawSize) {
+          rawSize = rawSize
+            .replace(/(\d+)\s*mm/gi, '$1 sq feet')
+            .replace(/\bmm\b/gi, 'sq feet');
+        }
+      }
+
       const sizeHeader = isMultiSizeTable ? (rawSize || 'Standard') : 'Values';
 
       if (rawSize || !isMultiSizeTable) {
@@ -184,8 +195,13 @@ const ProductCatalogPage = () => {
 
     Object.keys(initialStructure).forEach((key) => {
       const sizeArray = Array.from(initialStructure[key].sizes);
-      if (key === 'PW' || key === 'BB') {
-        sizeArray.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+      if (key === 'PW' || key === 'BB' || key === 'DECORATIVE') {
+        sizeArray.sort((a, b) => {
+          const numA = parseInt(a, 10);
+          const numB = parseInt(b, 10);
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          return a.localeCompare(b);
+        });
       }
       initialStructure[key].sizes = sizeArray.length > 0 ? sizeArray : ['Values'];
     });
@@ -213,9 +229,9 @@ const ProductCatalogPage = () => {
             border: '1px solid #EAEAEA',
             boxShadow: '0 4px 20px rgba(0,0,0,0.01)',
             width: '100%',
-            overflowX: 'auto', // Enforces smooth horizontal panning on smaller touch displays
+            overflowX: 'auto',
             WebkitOverflowScrolling: 'touch',
-            '&::-webkit-scrollbar': { height: '6px' }, // Clean, subtle mobile scrollbar visual
+            '&::-webkit-scrollbar': { height: '6px' },
             '&::-webkit-scrollbar-thumb': { backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '4px' }
           }}
         >
@@ -298,14 +314,14 @@ const ProductCatalogPage = () => {
       <Box sx={{ 
         pt: 0, 
         pb: 4, 
-        px: { xs: 1, sm: 2, md: 4 }, // Fluid downscaling of core canvas padding
+        px: { xs: 1, sm: 2, md: 4 }, 
         bgcolor: 'background.default', 
         minHeight: '100vh', 
         width: '100%' 
       }}>
         <Box sx={{ maxWidth: '1200px', mx: 'auto' }}>
 
-          {/* Filtering Control Layout Container - Responsive Flex adjustments */}
+          {/* Filtering Control Layout Container */}
           <Box sx={{ 
             display: 'flex', 
             flexDirection: { xs: 'column', sm: 'row' }, 
@@ -324,7 +340,7 @@ const ProductCatalogPage = () => {
                 onChange={(e, nextValue) => setSelectedFilter(nextValue)}
                 variant="scrollable"
                 scrollButtons="auto"
-                allowScrollButtonsMobile // Enables click buttons next to swiping tabs on mobile screens
+                allowScrollButtonsMobile
               >
                 <Tab label="All Categories" value="ALL" />
                 <Tab label="Plywood" value="PW" />

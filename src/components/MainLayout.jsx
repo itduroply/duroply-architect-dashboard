@@ -120,7 +120,7 @@ const MainLayout = ({ onLogout, account_number }) => {
     { path: '/locations', label: 'Site Details', icon: <FaMapMarkerAlt /> },
     { path: '/catalogues', label: 'Catalogues', icon: <FaBookOpen /> },
     { path: '/query', label: 'Help Desk', icon: <BiSupport /> },
-    { path: '/master', label: 'Reward Sheet', icon: <FaCog /> },
+    { path: '/master', label: 'Sheet Price', icon: <FaCog /> },
     { path: '/profile', label: 'Profile', icon: <FaUser /> },
   ];
 

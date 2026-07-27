@@ -20,8 +20,6 @@ import {
 } from '@mui/material';
 import {
   LocationOn as LocationPinIcon,
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
   InfoOutlined as InfoIcon,
   Close as CloseIcon,
   ConfirmationNumberOutlined as TicketIcon,
@@ -72,20 +70,34 @@ const cleanWorkspaceTheme = createTheme({
   }
 });
 
+// Helper function to format display unit: '32MM_', '32 MM_', '40MM_' -> '32 sq feet', '40 sq feet'
+const formatProductDisplayCode = (rawSku) => {
+  if (!rawSku) return 'UNSPECIFIED_SKU';
+  return String(rawSku)
+    .replace(/(\d+)\s*MM_?/gi, '$1 sq')
+    .replace(/\bMM_?/gi, 'sq')
+    .replace(/_$/g, '');
+};
+
 const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   if (!claimProductCode || !masterSkuRows || masterSkuRows.length === 0) return null;
   const rawClaimStr = String(claimProductCode).trim().toUpperCase();
   const isDoorException = rawClaimStr.includes('DECORATIVE') || rawClaimStr.includes('DOOR') || rawClaimStr.includes('FLUSH') || rawClaimStr.startsWith('FD');
-  if (!isDoorException && !/[0-9]+\s*MM$/i.test(rawClaimStr)) return null; 
+  
+  // Accept both MM and SQ FEET / SQFT suffixes, including optional trailing underscores like '32MM_'
+  if (!isDoorException && !/([0-9]+\s*(MM|SQ\s*FEET|SQFT))_?$/i.test(rawClaimStr)) return null; 
 
-  const normalize = (str) => String(str).toUpperCase().replace(/[\s_\-]/g, '');
+  const normalize = (str) => String(str).toUpperCase()
+    .replace(/SQ\s*FEET|SQFT/g, 'MM') // Normalize unit representation for matching
+    .replace(/[\s_\-]/g, '');
+
   const targetToken = normalize(rawClaimStr);
 
   let match = masterSkuRows.find(row => normalize(row.sku) === targetToken);
   if (match) return match;
 
   if (isDoorException) {
-    const baseClaimToken = rawClaimStr.replace(/_?\s*\d+\s*MM$/i, '').replace(/[\s_\-]/g, '');
+    const baseClaimToken = rawClaimStr.replace(/_?\s*\d+\s*(MM|SQ\s*FEET|SQFT)_?$/i, '').replace(/[\s_\-]/g, '');
     match = masterSkuRows.find(row => {
       const baseMasterToken = String(row.sku).toUpperCase().replace(/ALLTHICKNESS/i, '').replace(/[\s_\-]/g, '');
       return baseMasterToken === baseClaimToken || baseClaimToken.startsWith(baseMasterToken) || baseMasterToken.startsWith(baseClaimToken);
@@ -133,116 +145,118 @@ const LocationPage = ({ account_number }) => {
     description: ''
   });
 
+  // Helper to normalize lead IDs (handles both "LD2604003043" and "2604003043")
+  const normalizeLeadId = (id) => String(id || '').toUpperCase().replace(/^LD/, '').trim();
+
   useEffect(() => {
     const querySaaSIntelligence = async () => {
       setLoading(true);
       try {
-        if (account_number) {
-          const { data: archData } = await supabase
-            .from('master_architect')
-            .select('influencer_name, mobile_number')
-            .eq('account_number', account_number)
-            .maybeSingle();
-
-          if (archData) {
-            setFormData(prev => ({
-              ...prev,
-              name: archData.influencer_name || '',
-              mobileNo: archData.mobile_number || ''
-            }));
-          }
+        if (!account_number) {
+          setLoading(false);
+          return;
         }
 
-        // 📍 Fetching city, district, state, pincode, AND address from leads_master
+        const cleanAccNo = String(account_number).trim();
+
+        // 1. Fetch leads from leads_master
         const { data: leadsMaster, error: leadsError } = await supabase
           .from('leads_master')
           .select('lead_id, lead_status, city, district, state, pincode, linked_architect, address')
           .not('linked_architect', 'is', null)
-          .ilike('linked_architect', `%${account_number}%`);
+          .ilike('linked_architect', `%${cleanAccNo}%`);
 
         if (leadsError) throw leadsError;
-        if (!leadsMaster || leadsMaster.length === 0) return;
+        if (!leadsMaster || leadsMaster.length === 0) {
+          setClaimedSites([]);
+          setLoading(false);
+          return;
+        }
 
-        const activeIds = leadsMaster.map(l => l.lead_id);
+        // Collect raw and normalized lead IDs
+        const activeRawIds = leadsMaster.map(l => l.lead_id).filter(Boolean);
+        const normalizedLeadIds = activeRawIds.map(normalizeLeadId);
+        const querySearchIds = [...new Set([...activeRawIds, ...normalizedLeadIds])];
+
         const coreCities = [...new Set(leadsMaster.map(l => l.city).filter(Boolean))].sort();
-        if (coreCities.length > 0) setAvailableCities(coreCities);
+        setAvailableCities(coreCities);
 
-        const { data: claimsMaster, error: claimsError } = await supabase
-          .from('dmi_claims')
-          .select('lead_id, product_code, approved_qty, status')
-          .in('lead_id', activeIds);
+        // 2. Fetch ALL entries from commission_ledger
+        const { data: ledgerEntries, error: ledgerError } = await supabase
+          .from('commission_ledger')
+          .select('lead_id, product_sku, total_eligible_sheets, total_payout_amount, matrix_rate')
+          .in('lead_id', querySearchIds);
 
-        if (claimsError) throw claimsError;
+        if (ledgerError) console.error('❌ commission_ledger Error:', ledgerError);
 
-        const verifiedClaims = (claimsMaster || []).filter(c => c.status && c.status.toUpperCase() === 'APPROVED');
-        const { data: productSkuMaster, error: skuError } = await supabase.from('product_sku_master').select('sku, price');
-        if (skuError) throw skuError;
+        // 3. Process ALL claims directly
+        const allClaims = ledgerEntries || [];
+
+        // 4. Fetch product catalog for pricing fallback
+        const { data: productSkuMaster } = await supabase.from('product_sku_master').select('sku, price');
 
         const aggregationMap = {};
         let netPipelineSum = 0;
         let cumulativeVolumeSum = 0;
 
-        verifiedClaims.forEach(claim => {
-          const matchedCatalogRow = executeFuzzySaaSMatch(claim.product_code, productSkuMaster || []);
-          if (matchedCatalogRow) {
-            const qty = parseFloat(claim.approved_qty) || 0;
-            const baselinePrice = parseFloat(matchedCatalogRow.price) || 0;
-            
-            const standardCode = claim.product_code.trim().toUpperCase();
-            const isEligibleForPrototype = !(
-              standardCode.includes('INELIGIBLE') || 
-              standardCode.includes('PUMAPLY_12MM') || 
-              standardCode.includes('PW_DURO PUMAPLY_12MM') || 
-              standardCode.includes('DECORATIVE')
-            );
+        allClaims.forEach(claim => {
+          const normKey = normalizeLeadId(claim.lead_id);
+          const rawProdSku = claim.product_sku || 'UNSPECIFIED_SKU';
+          
+          // Formatted product SKU (e.g. 32MM_ -> 32 sq feet, 40MM_ -> 40 sq feet)
+          const prodSku = formatProductDisplayCode(rawProdSku);
+          const qty = parseFloat(claim.total_eligible_sheets) || 0;
+          
+          const matchedCatalogRow = executeFuzzySaaSMatch(rawProdSku, productSkuMaster || []);
+          const rate = claim.matrix_rate !== null && claim.matrix_rate !== undefined
+            ? parseFloat(claim.matrix_rate)
+            : (matchedCatalogRow ? parseFloat(matchedCatalogRow.price) : 0);
 
-            const computedNetLineValue = isEligibleForPrototype ? (qty * baselinePrice) : 0;
+          const computedNetLineValue = claim.total_payout_amount !== null && claim.total_payout_amount !== undefined
+            ? parseFloat(claim.total_payout_amount)
+            : (qty * rate);
 
-            if (isEligibleForPrototype) {
-              netPipelineSum += computedNetLineValue;
-            }
+          netPipelineSum += computedNetLineValue;
+          cumulativeVolumeSum += qty;
 
-            cumulativeVolumeSum += qty;
-
-            if (!aggregationMap[claim.lead_id]) aggregationMap[claim.lead_id] = {};
-            const uniqueProductKey = claim.product_code;
-            if (!aggregationMap[claim.lead_id][uniqueProductKey]) {
-              aggregationMap[claim.lead_id][uniqueProductKey] = { 
-                productCode: claim.product_code, 
-                totalQty: 0, 
-                calculatedTotalValue: 0,
-                isEligible: isEligibleForPrototype,
-                basePrice: baselinePrice
-              };
-            }
-
-            aggregationMap[claim.lead_id][uniqueProductKey].totalQty += qty;
-            aggregationMap[claim.lead_id][uniqueProductKey].calculatedTotalValue += computedNetLineValue;
+          if (!aggregationMap[normKey]) aggregationMap[normKey] = {};
+          if (!aggregationMap[normKey][prodSku]) {
+            aggregationMap[normKey][prodSku] = { 
+              productCode: prodSku, 
+              totalQty: 0, 
+              calculatedTotalValue: 0,
+              basePrice: rate
+            };
           }
+
+          aggregationMap[normKey][prodSku].totalQty += qty;
+          aggregationMap[normKey][prodSku].calculatedTotalValue += computedNetLineValue;
         });
 
-        setDashboardMetrics({ pipelineNetValue: netPipelineSum, globalSheetCount: cumulativeVolumeSum });
+        setDashboardMetrics({ 
+          pipelineNetValue: netPipelineSum, 
+          globalSheetCount: cumulativeVolumeSum 
+        });
 
-        const claimedPool = [];
-        leadsMaster.forEach(lead => {
-          const breakdown = Object.values(aggregationMap[lead.lead_id] || {});
+        // 5. Build final sites list
+        const claimedPool = leadsMaster.map(lead => {
+          const normKey = normalizeLeadId(lead.lead_id);
+          const breakdown = Object.values(aggregationMap[normKey] || {});
           const siteValuation = breakdown.reduce((sum, item) => sum + item.calculatedTotalValue, 0);
-          const model = { ...lead, siteValuation, breakdown };
-          
-          if (breakdown.length > 0) {
-            claimedPool.push(model);
-          }
+          return { ...lead, siteValuation, breakdown };
         });
 
         claimedPool.sort((x, y) => y.siteValuation - x.siteValuation);
         setClaimedSites(claimedPool);
+
       } catch (err) {
-        console.error("Tracking pipeline error:", err);
+        console.error("Pipeline error:", err);
       } finally {
         setLoading(false);
       }
     };
-    if (account_number) querySaaSIntelligence();
+
+    querySaaSIntelligence();
   }, [account_number]);
 
   const liveFilteredList = useMemo(() => {
@@ -328,7 +342,7 @@ const LocationPage = ({ account_number }) => {
       <CssBaseline />
       <Box sx={{ width: '100%', maxWidth: '950px', mx: 'auto', px: { xs: 2, sm: 3 }, pt: 2 }}>
         
-        {/* 🌿 LIGHT & SOOTHING PROMINENT TOP BANNER */}
+        {/* TOP BANNER */}
         <Paper
           elevation={0}
           sx={{
@@ -392,11 +406,11 @@ const LocationPage = ({ account_number }) => {
               }
             }}
           >
-            + Report Site
+            + Add Site
           </Button>
         </Paper>
 
-        {/* 🏁 METRICS LAYOUT BAR */}
+        {/* METRICS BAR */}
         <Box sx={{ 
           display: 'flex', 
           flexDirection: { xs: 'column', md: 'row' },
@@ -451,7 +465,7 @@ const LocationPage = ({ account_number }) => {
           </Box>
         </Box>
 
-        {/* 🎛️ PILL ROW FILTER */}
+        {/* REGION FILTER PILLS */}
         <Box sx={{ mb: 5, width: '100%' }}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, width: '100%' }}>
             <Button
@@ -497,7 +511,7 @@ const LocationPage = ({ account_number }) => {
           </Box>
         </Box>
 
-        {/* 📋 DATA STREAM RECORD LOG */}
+        {/* RECORD LOG */}
         {liveFilteredList.length === 0 ? (
           <Box sx={{ py: 6, textAlign: 'center', border: '1px dashed #C2A478', borderRadius: '2px' }}>
             <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
@@ -514,7 +528,7 @@ const LocationPage = ({ account_number }) => {
               return (
                 <Box key={site.lead_id} sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
                   
-                  {/* Lead Heading Row - ALWAYS VISIBLE ADDRESS HERE */}
+                  {/* Lead Heading Row */}
                   <Box 
                     onClick={() => toggleSite(site.lead_id)}
                     sx={{ 
@@ -536,7 +550,6 @@ const LocationPage = ({ account_number }) => {
                       <Typography sx={{ fontSize: '1.1rem', color: '#111625', fontWeight: 700, fontFamily: 'ui-monospace, monospace' }}>
                         Lead #{site.lead_id}
                       </Typography>
-                      {/* 🏠 VISIBLE FULL ADDRESS */}
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
                         <AddressIcon sx={{ color: '#C2A478', fontSize: 16, mt: 0.2, flexShrink: 0 }} />
                         <Typography sx={{ color: '#3A4250', fontWeight: 500, fontSize: '0.85rem', lineHeight: 1.4, wordBreak: 'break-word' }}>
@@ -553,7 +566,6 @@ const LocationPage = ({ account_number }) => {
                         </Typography>
                       </Box>
 
-                      {/* 🔽 EXPAND/COLLAPSE PILL WITH ARROW */}
                       <Box 
                         sx={{ 
                           display: 'flex', 
@@ -584,8 +596,6 @@ const LocationPage = ({ account_number }) => {
 
                   {/* Collapsible Content */}
                   <Collapse in={isSiteOpen} timeout="auto" unmountOnExit={false}>
-                    
-                    {/* 📍 CITY, DISTRICT, STATE & PINCODE CARD INSIDE HIDE/VIEW */}
                     <Box 
                       sx={{ 
                         p: 2, 
@@ -603,7 +613,7 @@ const LocationPage = ({ account_number }) => {
                       <LocationPinIcon sx={{ color: '#C2A478', fontSize: 20, mt: 0.2, flexShrink: 0 }} />
                       <Box sx={{ flex: 1 }}>
                         <Typography variant="caption" sx={{ color: '#C2A478', display: 'block', mb: 0.3, letterSpacing: '0.5px' }}>
-                          REGION / DISTRICT / STATE / Pincode
+                          REGION / DISTRICT / STATE / PINCODE
                         </Typography>
                         <Typography variant="body2" sx={{ color: '#111625', fontWeight: 500, lineHeight: 1.5, wordBreak: 'break-word' }}>
                           {locationDetails || 'No location coordinates configured'}
@@ -611,21 +621,18 @@ const LocationPage = ({ account_number }) => {
                       </Box>
                     </Box>
 
-                    {/* Inventory Matrix Grid */}
+                    {/* Breakdown Matrix Grid */}
                     {site.breakdown && site.breakdown.length > 0 ? (
                       <Box sx={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                         <Box sx={{ minWidth: '600px', width: '100%' }}>
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #111625', pb: 1, mb: 1 }}>
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 2.5 }}>PRODUCT CODE</Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>VOLUME</Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>UNIT PRICE</Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>NET VALUE</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 2.5 }}>PRODUCT SKU</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>ELIGIBLE SHEETS</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>MATRIX RATE</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>TOTAL PAYOUT</Typography>
                           </Box>
 
                           {site.breakdown.map((prod, idx) => {
-                            const displayUnitPrice = prod.isEligible ? prod.basePrice : 0;
-                            const displayNetValue = prod.isEligible ? prod.calculatedTotalValue : 0;
-
                             return (
                               <Box 
                                 key={idx} 
@@ -641,32 +648,16 @@ const LocationPage = ({ account_number }) => {
                                   <Typography noWrap sx={{ fontWeight: 600, color: '#111625', fontSize: '0.85rem', fontFamily: 'ui-monospace, monospace' }}>
                                     {prod.productCode}
                                   </Typography>
-                                  <Box sx={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 0.3,
-                                    px: 0.8,
-                                    py: 0.15,
-                                    bgcolor: prod.isEligible ? '#E8F5E9' : '#FFEBEE',
-                                    color: prod.isEligible ? '#2E7D32' : '#C62828',
-                                    borderRadius: '2px',
-                                    flexShrink: 0
-                                  }}>
-                                    {prod.isEligible ? <CheckCircleIcon sx={{ fontSize: 9, color: 'inherit' }} /> : <CancelIcon sx={{ fontSize: 9, color: 'inherit' }} />}
-                                    <Typography sx={{ fontSize: '0.525rem', fontWeight: 700, textTransform: 'uppercase', color: 'inherit' }}>
-                                      {prod.isEligible ? 'ELIGIBLE' : 'INELIGIBLE'}
-                                    </Typography>
-                                  </Box>
                                 </Box>
 
                                 <Typography sx={{ flex: 1, textAlign: 'right', color: '#6E7787', fontSize: '0.85rem' }}>
                                   {prod.totalQty.toLocaleString()}
                                 </Typography>
                                 <Typography sx={{ flex: 1, textAlign: 'right', color: '#3A4250', fontSize: '0.85rem' }}>
-                                  ₹{displayUnitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  ₹{prod.basePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </Typography>
                                 <Typography sx={{ flex: 1, textAlign: 'right', fontWeight: 600, color: '#111625', fontSize: '0.85rem' }}>
-                                  ₹{displayNetValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  ₹{prod.calculatedTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </Typography>
 
                               </Box>
@@ -687,9 +678,7 @@ const LocationPage = ({ account_number }) => {
           </Box>
         )}
 
-        {/* =========================================================
-            MISSING SITE MODAL POPUP
-        ========================================================= */}
+        {/* REPORT SITE MODAL POPUP */}
         <Dialog
           open={isModalOpen}
           TransitionComponent={Transition}
@@ -716,7 +705,7 @@ const LocationPage = ({ account_number }) => {
               </Box>
               <Box>
                 <Typography variant="h6" sx={{ fontWeight: 700, color: '#111625', lineHeight: 1.2 }}>
-                  Report Site
+                  Add Site
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#6E7787', textTransform: 'none', letterSpacing: 'normal' }}>
                   Submit site coordinates to create an official support ticket.
@@ -735,7 +724,6 @@ const LocationPage = ({ account_number }) => {
           <DialogContent sx={{ p: 3, pt: 2 }}>
             <Box component="form" onSubmit={handleFormSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
               
-              {/* READ-ONLY PREFILLED CONTACT & MOBILE FIELDS */}
               <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                 <TextField
                   label="Contact Name"
@@ -761,7 +749,6 @@ const LocationPage = ({ account_number }) => {
                 />
               </Box>
 
-              {/* 👤 SITE OWNER FIELD (OPTIONAL) */}
               <TextField
                 label="Site Owner (Optional)"
                 name="siteOwner"
@@ -821,7 +808,6 @@ const LocationPage = ({ account_number }) => {
                 size="small"
               />
 
-              {/* DESCRIPTION / NOTES INPUT FIELD */}
               <TextField
                 required
                 label="Description / Additional Notes"
@@ -873,7 +859,7 @@ const LocationPage = ({ account_number }) => {
           </DialogContent>
         </Dialog>
 
-        {/* SNACKBAR NOTIFICATION */}
+        {/* NOTIFICATION */}
         <Snackbar
           open={toast.open}
           autoHideDuration={4000}
