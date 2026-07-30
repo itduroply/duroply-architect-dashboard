@@ -105,8 +105,9 @@ const premiumInventoryTheme = createTheme({
   }
 });
 
-const ProductCatalogPage = () => {
+const ProductCatalogPage = ({ account_number }) => {
   const [products, setProducts] = useState([]);
+  const [ledgerOverrides, setLedgerOverrides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState('ALL');
 
@@ -114,24 +115,63 @@ const ProductCatalogPage = () => {
     const fetchCatalogData = async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase
+        // 1. Fetch product master entries
+        const { data: masterData, error: masterError } = await supabase
           .from('product_sku_master')
-          .select('group, sku, size, price');
+          .select('group, sku, size, price, percentage');
 
-        if (error) throw error;
-        setProducts(data || []);
+        if (masterError) throw masterError;
+        setProducts(masterData || []);
+
+        // 2. Fetch commission ledger matching account_number in architect_name
+        if (account_number) {
+          const cleanAccNo = String(account_number).trim();
+          const { data: ledgerData, error: ledgerError } = await supabase
+            .from('commission_ledger')
+            .select('architect_name, product_sku, percentage, matrix_rate')
+            .ilike('architect_name', `%${cleanAccNo}%`);
+
+          if (!ledgerError && ledgerData) {
+            // Keep rows where commission percentage is not 7%
+            const nonSevenRows = ledgerData.filter((row) => {
+              const pct = String(row.percentage || '').trim();
+              return pct !== '7%' && pct !== '7' && pct !== '';
+            });
+            setLedgerOverrides(nonSevenRows);
+          }
+        }
       } catch (err) {
-        console.error('Error retrieving product matrix:', err);
+        console.error('Error retrieving product matrix / ledger:', err);
       } finally {
         setLoading(false);
       }
     };
 
     fetchCatalogData();
-  }, []);
+  }, [account_number]);
+
+  // Helper function to normalize SKU formats for consistent matching
+  const superNormalize = (sku) => {
+    if (!sku) return '';
+    let str = String(sku).toUpperCase();
+    str = str.split('(')[0];
+    str = str.replace(/ALLTHICKNESS/g, '');
+    str = str.replace(/[^A-Z0-9]/g, '');
+    return str;
+  };
+
+  // Helper to extract base brand name from raw SKU
+  const extractBaseBrandName = (rawSku) => {
+    if (!rawSku) return 'UNASSIGNED BRAND';
+    let cleanName = rawSku.trim().toUpperCase();
+    cleanName = cleanName.replace(/^(PW|BB|FD|DECORATIVE)-\s*/i, '');
+    cleanName = cleanName.replace(/\b\d+\s*MM\b/gi, '');
+    cleanName = cleanName.replace(/^[- ]+|[- ]+$/g, '');
+    return cleanName || rawSku;
+  };
 
   // =========================================================
-  // 🔄 DATA PIVOT SYSTEM (Unit Conversion for Decorative)
+  // 🔄 DATA PIVOT SYSTEM (Custom Matrix & Ledger Override Logic)
   // =========================================================
   const structuredMatrices = useMemo(() => {
     const initialStructure = {
@@ -141,19 +181,18 @@ const ProductCatalogPage = () => {
       DECORATIVE: { title: "Decorative Veneer", sizes: new Set(), rows: {} }
     };
 
-    const extractBaseBrandName = (rawSku) => {
-      if (!rawSku) return 'UNASSIGNED BRAND';
-      let cleanName = rawSku.trim().toUpperCase();
-      
-      cleanName = cleanName.replace(/^(PW|BB|FD|DECORATIVE)-\s*/i, '');
-      cleanName = cleanName.replace(/\b\d+\s*MM\b/gi, '');
-      cleanName = cleanName.replace(/^[- ]+|[- ]+$/g, '');
-      
-      return cleanName || rawSku;
-    };
+    // Construct ledger map for quick non-7% lookup by normalized SKU
+    const overrideMap = new Map();
+    ledgerOverrides.forEach((row) => {
+      const normKey = superNormalize(row.product_sku);
+      if (normKey && row.matrix_rate !== undefined && row.matrix_rate !== null) {
+        overrideMap.set(normKey, parseFloat(row.matrix_rate));
+      }
+    });
 
     products.forEach((item) => {
       const rawGroup = (item.group || '').trim().toUpperCase();
+      const rawSku = (item.sku || '').trim().toUpperCase();
       let categoryKey = 'PW';
 
       if (rawGroup.includes('BLOCK') || rawGroup === 'BB') {
@@ -166,18 +205,40 @@ const ProductCatalogPage = () => {
         categoryKey = 'PW';
       }
 
+      // =========================================================
+      // 🎯 SPECIAL OVERRIDE: DUROTEAK-ALLTHICKNESS
+      // =========================================================
+      if (rawSku.includes('DUROTEAK') || extractBaseBrandName(rawSku).includes('DUROTEAK')) {
+        const targetBrand = 'DUROTEAK';
+
+        initialStructure.DECORATIVE.sizes.add('32 sq feet');
+        initialStructure.DECORATIVE.sizes.add('40 sq feet');
+
+        if (!initialStructure.DECORATIVE.rows[targetBrand]) {
+          initialStructure.DECORATIVE.rows[targetBrand] = {};
+        }
+
+        // Check if ledger override exists for DUROTEAK
+        const normalizedItemSku = superNormalize(rawSku);
+        const overrideRate = overrideMap.get(normalizedItemSku);
+        const finalRate = overrideRate !== undefined ? overrideRate : 75;
+
+        initialStructure.DECORATIVE.rows[targetBrand]['32 sq feet'] = finalRate;
+        initialStructure.DECORATIVE.rows[targetBrand]['40 sq feet'] = finalRate;
+
+        return;
+      }
+
       const brandName = extractBaseBrandName(item.sku);
       let rawSize = (item.size || '').trim();
 
       const isMultiSizeTable = categoryKey === 'PW' || categoryKey === 'BB' || categoryKey === 'DECORATIVE';
 
-      // Unit replacement: converts '32 mm' -> '32 sq feet', '40 mm' -> '40 sq feet', etc.
-      if (categoryKey === 'DECORATIVE') {
-        if (rawSize) {
-          rawSize = rawSize
-            .replace(/(\d+)\s*mm/gi, '$1 sq feet')
-            .replace(/\bmm\b/gi, 'sq feet');
-        }
+      // Unit replacement for Decorative
+      if (categoryKey === 'DECORATIVE' && rawSize) {
+        rawSize = rawSize
+          .replace(/(\d+)\s*mm/gi, '$1 sq feet')
+          .replace(/\bmm\b/gi, 'sq feet');
       }
 
       const sizeHeader = isMultiSizeTable ? (rawSize || 'Standard') : 'Values';
@@ -190,9 +251,30 @@ const ProductCatalogPage = () => {
         initialStructure[categoryKey].rows[brandName] = {};
       }
       
-      initialStructure[categoryKey].rows[brandName][sizeHeader] = item.price;
+      // Determine rate: Prioritize ledger matrix_rate for non-7% entries, fallback to master catalog
+      const normalizedItemSku = superNormalize(item.sku);
+      const ledgerRateOverride = overrideMap.get(normalizedItemSku);
+
+      if (ledgerRateOverride !== undefined) {
+        initialStructure[categoryKey].rows[brandName][sizeHeader] = ledgerRateOverride;
+      } else {
+        if (categoryKey === 'DECORATIVE') {
+          const itemPct = String(item.percentage || '').trim();
+          const isSevenPercent = itemPct.includes('7');
+          const existingVal = initialStructure[categoryKey].rows[brandName][sizeHeader];
+
+          if (isSevenPercent) {
+            initialStructure[categoryKey].rows[brandName][sizeHeader] = item.price;
+          } else if (existingVal === undefined) {
+            initialStructure[categoryKey].rows[brandName][sizeHeader] = item.price;
+          }
+        } else {
+          initialStructure[categoryKey].rows[brandName][sizeHeader] = item.price;
+        }
+      }
     });
 
+    // Clean up and sort headers
     Object.keys(initialStructure).forEach((key) => {
       const sizeArray = Array.from(initialStructure[key].sizes);
       if (key === 'PW' || key === 'BB' || key === 'DECORATIVE') {
@@ -207,7 +289,7 @@ const ProductCatalogPage = () => {
     });
 
     return initialStructure;
-  }, [products]);
+  }, [products, ledgerOverrides]);
 
   const renderStructureTable = (matrixData) => {
     const brandEntries = Object.keys(matrixData.rows);
@@ -249,7 +331,7 @@ const ProductCatalogPage = () => {
                   align="center"
                   sx={{ color: '#1A1A1A', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', py: 1.5, px: 2, borderBottom: hasSubThicknessHeaders ? '1px solid #EAEAEA' : '2px solid #1A1A1A' }}
                 >
-                  Value
+                  {matrixData.title === "Decorative Veneer" ? "Square Feet" : "Value"}
                 </TableCell>
               </TableRow>
               {hasSubThicknessHeaders && (

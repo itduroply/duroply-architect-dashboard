@@ -70,12 +70,20 @@ const cleanWorkspaceTheme = createTheme({
   }
 });
 
-// Helper function to format display unit: '32MM_', '32 MM_', '40MM_' -> '32 sq feet', '40 sq feet'
 const formatProductDisplayCode = (rawSku) => {
   if (!rawSku) return 'UNSPECIFIED_SKU';
-  return String(rawSku)
-    .replace(/(\d+)\s*MM_?/gi, '$1 sq')
-    .replace(/\bMM_?/gi, 'sq')
+  
+  const rawStr = String(rawSku);
+  
+  // Normalize string to check for 'NATURESIGNATURE' regardless of spaces/underscores
+  const normalizedStr = rawStr.toUpperCase().replace(/[\s_]/g, '');
+  const isNatureSignature = normalizedStr.includes('NATURESIGNATURE');
+  
+  const unitLabel = isNatureSignature ? 'sq feet' : 'MM';
+
+  return rawStr
+    .replace(/(\d+)\s*MM_?/gi, `$1 ${unitLabel}`)
+    .replace(/\bMM_?/gi, unitLabel)
     .replace(/_$/g, '');
 };
 
@@ -84,11 +92,11 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   const rawClaimStr = String(claimProductCode).trim().toUpperCase();
   const isDoorException = rawClaimStr.includes('DECORATIVE') || rawClaimStr.includes('DOOR') || rawClaimStr.includes('FLUSH') || rawClaimStr.startsWith('FD');
   
-  // Accept both MM and SQ FEET / SQFT suffixes, including optional trailing underscores like '32MM_'
+  // Accept MM, SQ FEET, or SQFT suffixes, with optional trailing underscore
   if (!isDoorException && !/([0-9]+\s*(MM|SQ\s*FEET|SQFT))_?$/i.test(rawClaimStr)) return null; 
 
   const normalize = (str) => String(str).toUpperCase()
-    .replace(/SQ\s*FEET|SQFT/g, 'MM') // Normalize unit representation for matching
+    .replace(/SQ\s*FEET|SQFT/g, 'MM') // Normalize unit representation for matching across catalog
     .replace(/[\s_\-]/g, '');
 
   const targetToken = normalize(rawClaimStr);
@@ -111,6 +119,8 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   });
   return match || null;
 };
+
+
 
 const LocationPage = ({ account_number }) => {
   const [loading, setLoading] = useState(true);
@@ -628,7 +638,7 @@ const LocationPage = ({ account_number }) => {
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #111625', pb: 1, mb: 1 }}>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 2.5 }}>PRODUCT SKU</Typography>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>ELIGIBLE SHEETS</Typography>
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>MATRIX RATE</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>UNIT PRICE</Typography>
                             <Typography variant="caption" sx={{ fontWeight: 700, color: '#111625', fontSize: '0.65rem', flex: 1, textAlign: 'right' }}>TOTAL PAYOUT</Typography>
                           </Box>
 
@@ -645,7 +655,7 @@ const LocationPage = ({ account_number }) => {
                                 }}
                               >
                                 <Box sx={{ flex: 2.5, display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, pr: 1 }}>
-                                  <Typography noWrap sx={{ fontWeight: 600, color: '#111625', fontSize: '0.85rem', fontFamily: 'ui-monospace, monospace' }}>
+                                  <Typography noWrap sx={{ fontWeight: 600, color: '#111625', fontSize: '0.75rem', fontFamily: 'ui-monospace, monospace' }}>
                                     {prod.productCode}
                                   </Typography>
                                 </Box>
