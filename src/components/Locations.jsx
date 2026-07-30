@@ -74,8 +74,6 @@ const formatProductDisplayCode = (rawSku) => {
   if (!rawSku) return 'UNSPECIFIED_SKU';
   
   const rawStr = String(rawSku);
-  
-  // Normalize string to check for 'NATURESIGNATURE' regardless of spaces/underscores
   const normalizedStr = rawStr.toUpperCase().replace(/[\s_]/g, '');
   const isNatureSignature = normalizedStr.includes('NATURESIGNATURE');
   
@@ -92,11 +90,10 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   const rawClaimStr = String(claimProductCode).trim().toUpperCase();
   const isDoorException = rawClaimStr.includes('DECORATIVE') || rawClaimStr.includes('DOOR') || rawClaimStr.includes('FLUSH') || rawClaimStr.startsWith('FD');
   
-  // Accept MM, SQ FEET, or SQFT suffixes, with optional trailing underscore
   if (!isDoorException && !/([0-9]+\s*(MM|SQ\s*FEET|SQFT))_?$/i.test(rawClaimStr)) return null; 
 
   const normalize = (str) => String(str).toUpperCase()
-    .replace(/SQ\s*FEET|SQFT/g, 'MM') // Normalize unit representation for matching across catalog
+    .replace(/SQ\s*FEET|SQFT/g, 'MM')
     .replace(/[\s_\-]/g, '');
 
   const targetToken = normalize(rawClaimStr);
@@ -119,8 +116,6 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   });
   return match || null;
 };
-
-
 
 const LocationPage = ({ account_number }) => {
   const [loading, setLoading] = useState(true);
@@ -155,7 +150,6 @@ const LocationPage = ({ account_number }) => {
     description: ''
   });
 
-  // Helper to normalize lead IDs (handles both "LD2604003043" and "2604003043")
   const normalizeLeadId = (id) => String(id || '').toUpperCase().replace(/^LD/, '').trim();
 
   useEffect(() => {
@@ -179,6 +173,7 @@ const LocationPage = ({ account_number }) => {
         if (leadsError) throw leadsError;
         if (!leadsMaster || leadsMaster.length === 0) {
           setClaimedSites([]);
+          setAvailableCities([]);
           setLoading(false);
           return;
         }
@@ -188,10 +183,7 @@ const LocationPage = ({ account_number }) => {
         const normalizedLeadIds = activeRawIds.map(normalizeLeadId);
         const querySearchIds = [...new Set([...activeRawIds, ...normalizedLeadIds])];
 
-        const coreCities = [...new Set(leadsMaster.map(l => l.city).filter(Boolean))].sort();
-        setAvailableCities(coreCities);
-
-        // 2. Fetch ALL entries from commission_ledger
+        // 2. Fetch entries from commission_ledger
         const { data: ledgerEntries, error: ledgerError } = await supabase
           .from('commission_ledger')
           .select('lead_id, product_sku, total_eligible_sheets, total_payout_amount, matrix_rate')
@@ -199,10 +191,9 @@ const LocationPage = ({ account_number }) => {
 
         if (ledgerError) console.error('❌ commission_ledger Error:', ledgerError);
 
-        // 3. Process ALL claims directly
         const allClaims = ledgerEntries || [];
 
-        // 4. Fetch product catalog for pricing fallback
+        // 3. Fetch product catalog for pricing fallback
         const { data: productSkuMaster } = await supabase.from('product_sku_master').select('sku, price');
 
         const aggregationMap = {};
@@ -212,8 +203,6 @@ const LocationPage = ({ account_number }) => {
         allClaims.forEach(claim => {
           const normKey = normalizeLeadId(claim.lead_id);
           const rawProdSku = claim.product_sku || 'UNSPECIFIED_SKU';
-          
-          // Formatted product SKU (e.g. 32MM_ -> 32 sq feet, 40MM_ -> 40 sq feet)
           const prodSku = formatProductDisplayCode(rawProdSku);
           const qty = parseFloat(claim.total_eligible_sheets) || 0;
           
@@ -248,13 +237,22 @@ const LocationPage = ({ account_number }) => {
           globalSheetCount: cumulativeVolumeSum 
         });
 
-        // 5. Build final sites list
-        const claimedPool = leadsMaster.map(lead => {
-          const normKey = normalizeLeadId(lead.lead_id);
-          const breakdown = Object.values(aggregationMap[normKey] || {});
-          const siteValuation = breakdown.reduce((sum, item) => sum + item.calculatedTotalValue, 0);
-          return { ...lead, siteValuation, breakdown };
-        });
+        // 4. Build final sites list: ONLY include leads present in BOTH leads_master and commission_ledger
+        const claimedPool = leadsMaster
+          .filter(lead => {
+            const normKey = normalizeLeadId(lead.lead_id);
+            return aggregationMap[normKey] && Object.keys(aggregationMap[normKey]).length > 0;
+          })
+          .map(lead => {
+            const normKey = normalizeLeadId(lead.lead_id);
+            const breakdown = Object.values(aggregationMap[normKey] || {});
+            const siteValuation = breakdown.reduce((sum, item) => sum + item.calculatedTotalValue, 0);
+            return { ...lead, siteValuation, breakdown };
+          });
+
+        // Update available city pills based on intersected leads
+        const coreCities = [...new Set(claimedPool.map(l => l.city).filter(Boolean))].sort();
+        setAvailableCities(coreCities);
 
         claimedPool.sort((x, y) => y.siteValuation - x.siteValuation);
         setClaimedSites(claimedPool);
@@ -278,7 +276,6 @@ const LocationPage = ({ account_number }) => {
     return claimedSites.length;
   }, [claimedSites]);
 
-  // 🎲 5-Digit Ticket Generator
   const generateFiveDigitTicket = () => {
     return String(Math.floor(10000 + Math.random() * 90000));
   };
@@ -287,7 +284,6 @@ const LocationPage = ({ account_number }) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // 📩 Submit Ticket Handler
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     const { name, mobileNo, siteOwner, siteAddress, district, state, pincode, description } = formData;
