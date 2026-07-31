@@ -124,7 +124,7 @@ const LocationPage = ({ account_number }) => {
   const [dashboardMetrics, setDashboardMetrics] = useState({ pipelineNetValue: 0, globalSheetCount: 0 });
   const [claimedSites, setClaimedSites] = useState([]);
 
-  // 📂 Independent Site Collapse/Expand State
+  // Independent Site Collapse/Expand State
   const [openSites, setOpenSites] = useState({});
 
   const toggleSite = (leadId) => {
@@ -134,7 +134,7 @@ const LocationPage = ({ account_number }) => {
     }));
   };
 
-  // 🏛️ Modal & Form State
+  // Modal & Form State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
@@ -163,6 +163,23 @@ const LocationPage = ({ account_number }) => {
 
         const cleanAccNo = String(account_number).trim();
 
+        // 0. Fetch influencer details from master_architect table
+        const { data: archData, error: archError } = await supabase
+          .from('master_architect')
+          .select('influencer_name, mobile_number')
+          .eq('account_number', cleanAccNo)
+          .maybeSingle();
+
+        if (archError) {
+          console.error('❌ master_architect Error:', archError);
+        } else if (archData) {
+          setFormData(prev => ({
+            ...prev,
+            name: archData.influencer_name || '',
+            mobileNo: archData.mobile_number || ''
+          }));
+        }
+
         // 1. Fetch leads from leads_master
         const { data: leadsMaster, error: leadsError } = await supabase
           .from('leads_master')
@@ -183,7 +200,7 @@ const LocationPage = ({ account_number }) => {
         const normalizedLeadIds = activeRawIds.map(normalizeLeadId);
         const querySearchIds = [...new Set([...activeRawIds, ...normalizedLeadIds])];
 
-        // 2. Fetch entries from commission_ledger
+        // 2. Fetch ALL entries from commission_ledger
         const { data: ledgerEntries, error: ledgerError } = await supabase
           .from('commission_ledger')
           .select('lead_id, product_sku, total_eligible_sheets, total_payout_amount, matrix_rate')
@@ -237,7 +254,7 @@ const LocationPage = ({ account_number }) => {
           globalSheetCount: cumulativeVolumeSum 
         });
 
-        // 4. Build final sites list: ONLY include leads present in BOTH leads_master and commission_ledger
+        // 4. Inner Join: Filter out leads that do not exist in commission_ledger
         const claimedPool = leadsMaster
           .filter(lead => {
             const normKey = normalizeLeadId(lead.lead_id);
@@ -250,11 +267,11 @@ const LocationPage = ({ account_number }) => {
             return { ...lead, siteValuation, breakdown };
           });
 
-        // Update available city pills based on intersected leads
+        claimedPool.sort((x, y) => y.siteValuation - x.siteValuation);
+
+        // Update cities based on filtered leads only
         const coreCities = [...new Set(claimedPool.map(l => l.city).filter(Boolean))].sort();
         setAvailableCities(coreCities);
-
-        claimedPool.sort((x, y) => y.siteValuation - x.siteValuation);
         setClaimedSites(claimedPool);
 
       } catch (err) {
