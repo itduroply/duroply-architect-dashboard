@@ -1,46 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  ThemeProvider,
-  createTheme,
-  CssBaseline,
-  Box,
-  Typography,
-  Button,
-  Dialog,
-  TextField,
-  IconButton,
-  Chip,
-  Tabs,
-  Tab,
-  CircularProgress,
-  InputAdornment,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  MenuItem
-} from '@mui/material';
-import {
-  Close as CloseIcon,
-  Search as SearchIcon,
-  AssignmentTurnedIn as ResolvedIcon,
-  AccessTime as PendingIcon,
-  ArrowForward as ArrowIcon,
-  CheckCircleOutlined as SuccessIcon,
-  WarningAmberOutlined as WarningIcon,
-  SettingsOutlined as ProductIcon,
-  ChatBubbleOutlineOutlined as FeedbackIcon,
-  CalendarTodayOutlined as VisitIcon,
-  CardGiftcardOutlined as RewardIcon,
-  LocationOnOutlined as LocationIcon
-} from '@mui/icons-material';
+import { ThemeProvider, createTheme, CssBaseline, Box, Typography, Button, Dialog,
+  TextField, IconButton, Chip, Tabs, Tab, CircularProgress, InputAdornment, Table,
+  TableBody, TableCell, TableContainer, TableHead, TableRow, MenuItem} from '@mui/material';
+import { Close as CloseIcon, Search as SearchIcon, AssignmentTurnedIn as ResolvedIcon, AccessTime as PendingIcon, ArrowForward as ArrowIcon,
+  CheckCircleOutlined as SuccessIcon, WarningAmberOutlined as WarningIcon, SettingsOutlined as ProductIcon, ChatBubbleOutlineOutlined as FeedbackIcon,
+  CalendarTodayOutlined as VisitIcon, CardGiftcardOutlined as RewardIcon, LocationOnOutlined as LocationIcon} from '@mui/icons-material';
 import { supabase } from '../supabaseClient';
 
-// ==========================================
 // PREMIUM LUXURY EDITORIAL COLOR PALETTE
-// ==========================================
+
 const premiumGoldTheme = createTheme({
   palette: {
     mode: 'light',

@@ -1,29 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  ThemeProvider,
-  createTheme,
-  CssBaseline,
-  Box,
-  Typography,
-  CircularProgress,
-  Tabs,
-  Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper
-} from '@mui/material';
+import {ThemeProvider,createTheme,CssBaseline,Box,Typography,CircularProgress,Tabs,Tab,
+  Table,TableBody,TableCell,TableContainer,TableHead,TableRow,Paper} from '@mui/material';
 import {
   FilterListOutlined as FilterIcon
 } from '@mui/icons-material';
 import { supabase } from '../supabaseClient';
 
-// ==========================================
-// 🎨 LIGHT LUXURY EDITORIAL SHOWROOM THEME
-// ==========================================
+
 const premiumInventoryTheme = createTheme({
   palette: {
     mode: 'light',
@@ -170,15 +153,15 @@ const ProductCatalogPage = ({ account_number }) => {
     return cleanName || rawSku;
   };
 
-  // =========================================================
   // 🔄 DATA PIVOT SYSTEM (Custom Matrix & Ledger Override Logic)
-  // =========================================================
+
   const structuredMatrices = useMemo(() => {
     const initialStructure = {
       PW: { title: "Plywood", sizes: new Set(), rows: {} },
       BB: { title: "Blockboard", sizes: new Set(), rows: {} },
       FD: { title: "Flush Doors", sizes: new Set(), rows: {} },
-      DECORATIVE: { title: "Decorative Veneer", sizes: new Set(), rows: {} }
+      DECORATIVE: { title: "Decorative Veneer", sizes: new Set(), rows: {} },
+      DUROTEAK: { title: "DUROTEAK", sizes: new Set(), rows: {} }
     };
 
     // Construct ledger map for quick non-7% lookup by normalized SKU
@@ -205,17 +188,16 @@ const ProductCatalogPage = ({ account_number }) => {
         categoryKey = 'PW';
       }
 
-      // =========================================================
       // 🎯 SPECIAL OVERRIDE: DUROTEAK-ALLTHICKNESS
-      // =========================================================
+      
       if (rawSku.includes('DUROTEAK') || extractBaseBrandName(rawSku).includes('DUROTEAK')) {
         const targetBrand = 'DUROTEAK';
 
-        initialStructure.DECORATIVE.sizes.add('32 sq feet');
-        initialStructure.DECORATIVE.sizes.add('40 sq feet');
+        initialStructure.DUROTEAK.sizes.add('32 sq feet');
+        initialStructure.DUROTEAK.sizes.add('40 sq feet');
 
-        if (!initialStructure.DECORATIVE.rows[targetBrand]) {
-          initialStructure.DECORATIVE.rows[targetBrand] = {};
+        if (!initialStructure.DUROTEAK.rows[targetBrand]) {
+          initialStructure.DUROTEAK.rows[targetBrand] = {};
         }
 
         // Check if ledger override exists for DUROTEAK
@@ -223,8 +205,8 @@ const ProductCatalogPage = ({ account_number }) => {
         const overrideRate = overrideMap.get(normalizedItemSku);
         const finalRate = overrideRate !== undefined ? overrideRate : 75;
 
-        initialStructure.DECORATIVE.rows[targetBrand]['32 sq feet'] = finalRate;
-        initialStructure.DECORATIVE.rows[targetBrand]['40 sq feet'] = finalRate;
+        initialStructure.DUROTEAK.rows[targetBrand]['32 sq feet'] = finalRate;
+        initialStructure.DUROTEAK.rows[targetBrand]['40 sq feet'] = finalRate;
 
         return;
       }
@@ -277,7 +259,7 @@ const ProductCatalogPage = ({ account_number }) => {
     // Clean up and sort headers
     Object.keys(initialStructure).forEach((key) => {
       const sizeArray = Array.from(initialStructure[key].sizes);
-      if (key === 'PW' || key === 'BB' || key === 'DECORATIVE') {
+      if (key === 'PW' || key === 'BB' || key === 'DECORATIVE' || key === 'DUROTEAK') {
         sizeArray.sort((a, b) => {
           const numA = parseInt(a, 10);
           const numB = parseInt(b, 10);
@@ -331,7 +313,7 @@ const ProductCatalogPage = ({ account_number }) => {
                   align="center"
                   sx={{ color: '#1A1A1A', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', py: 1.5, px: 2, borderBottom: hasSubThicknessHeaders ? '1px solid #EAEAEA' : '2px solid #1A1A1A' }}
                 >
-                  {matrixData.title === "Decorative Veneer" ? "Square Feet" : "Value"}
+                  {matrixData.title === "Decorative Veneer" || matrixData.title === "DUROTEAK" ? "Square Feet" : "Value"}
                 </TableCell>
               </TableRow>
               {hasSubThicknessHeaders && (
@@ -429,6 +411,7 @@ const ProductCatalogPage = ({ account_number }) => {
                 <Tab label="Blockboard" value="BB" />
                 <Tab label="Doors" value="FD" />
                 <Tab label="Decorative Veneers" value="DECORATIVE" />
+                <Tab label="DUROTEAK" value="DUROTEAK" />
               </Tabs>
             </Box>
           </Box>
@@ -453,6 +436,9 @@ const ProductCatalogPage = ({ account_number }) => {
               }
               {(selectedFilter === 'ALL' || selectedFilter === 'DECORATIVE') && 
                 renderStructureTable(structuredMatrices.DECORATIVE)
+              }
+              {(selectedFilter === 'ALL' || selectedFilter === 'DUROTEAK') && 
+                renderStructureTable(structuredMatrices.DUROTEAK)
               }
             </Box>
           )}

@@ -26,9 +26,8 @@ import image3 from './image3.jpeg';
 import image4 from './image4.jpeg';
 import image5 from './image5.jpeg';
 
-// ==========================================
-// 🌟 LIGHT LUXURY SHOWROOM THEME
-// ==========================================
+//  LIGHT LUXURY SHOWROOM THEME
+
 const premiumLuxeTheme = createTheme({
   palette: {
     mode: 'light',
@@ -143,9 +142,8 @@ export default function CatalogShowcase() {
       }}>
         <Box sx={{ width: '100%', maxWidth: '1200px', mx: 'auto' }}>
           
-          {/* ==========================================
-              🏆 MINIMALIST LUXURY HEADER
-          ========================================== */}
+            //MINIMALIST LUXURY HEADER
+
           <Box sx={{ mb: 6, mt: 2 }}>
             <Typography variant="caption" component="span" sx={{ display: 'block', mb: 0.5 }}>
               Curated Architectural Materials
@@ -155,9 +153,8 @@ export default function CatalogShowcase() {
             </Typography>
           </Box>
 
-          {/* ==========================================
-              📋 GALLERY GRID
-          ========================================== */}
+              //GALLERY GRID
+              
           <Box sx={{ 
             display: 'grid', 
             gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, 

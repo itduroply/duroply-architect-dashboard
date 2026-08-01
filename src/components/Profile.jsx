@@ -26,9 +26,9 @@ import {
   VerifiedUserOutlined as VerifiedUser
 } from '@mui/icons-material';
 
-// ==========================================
+
 // 🎨 LIGHT LUXURY CORPORATE EDITORIAL THEME
-// ==========================================
+
 const premiumProfileTheme = createTheme({
   palette: {
     mode: 'light',
@@ -165,9 +165,9 @@ export default function ProfileSection({ account_number }) {
       }}>
         <Stack spacing={2} sx={{ width: '100%', maxWidth: '1200px' }}>
           
-          {/* ========================================================
-              📦 ROW 01: 50/50 SYMMETRICAL IDENTITY & TIMELINE ROW
-          ======================================================== */}
+          
+             // 📦 ROW 01: 50/50 SYMMETRICAL IDENTITY & TIMELINE ROW
+             
           <Box 
             sx={{ 
               display: 'flex', 

@@ -1,37 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { 
-  FaTachometerAlt, 
-  FaExchangeAlt, 
-  FaMapMarkerAlt, 
-  FaBookOpen, 
-  FaUser, 
-  FaSignOutAlt, 
-  FaCog, 
-  FaBars, 
-  FaTimes 
-} from 'react-icons/fa';
+import {  FaTachometerAlt,  FaExchangeAlt,  FaMapMarkerAlt,  FaBookOpen, FaUser,  FaSignOutAlt,  FaCog,  FaBars, 
+  FaTimes } from 'react-icons/fa';
 import { BiSupport } from "react-icons/bi";
 import { supabase } from '../supabaseClient'; 
 
 // MUI Imports
-import { 
-  Box, 
-  Typography, 
-  List, 
-  ListItem, 
-  ListItemButton, 
-  ListItemIcon, 
-  ListItemText, 
-  Avatar, 
-  Button,
-  ThemeProvider,
-  createTheme,
-  CssBaseline,
-  Drawer,
-  IconButton,
-  useMediaQuery
-} from '@mui/material';
+import {  Box,  Typography,  List,  ListItem,  ListItemButton,  ListItemIcon,  ListItemText,  Avatar, 
+  Button, ThemeProvider, createTheme, CssBaseline, Drawer, IconButton, useMediaQuery} from '@mui/material';
 
 // Custom Luxury Theme
 const luxuryTheme = createTheme({
