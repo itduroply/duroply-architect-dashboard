@@ -4,6 +4,7 @@ import {  FaTachometerAlt,  FaExchangeAlt,  FaMapMarkerAlt,  FaBookOpen, FaUser,
   FaTimes } from 'react-icons/fa';
 import { BiSupport } from "react-icons/bi";
 import { supabase } from '../supabaseClient'; 
+import { formatArchitectDisplayName } from './formatArchitectDisplayName';
 
 // MUI Imports
 import {  Box,  Typography,  List,  ListItem,  ListItemButton,  ListItemIcon,  ListItemText,  Avatar, 
@@ -45,12 +46,24 @@ const MainLayout = ({ onLogout, account_number }) => {
     setMobileOpen(!mobileOpen);
   };
 
-  // Fetch the influencer_name matching the account_number
+  // Fetch only the UI display name; no backend data is changed here.
   useEffect(() => {
     const fetchArchitectDetails = async () => {
       if (!account_number) return;
 
       try {
+        const { data: ledgerRow, error: ledgerError } = await supabase
+          .from('commission_ledger')
+          .select('architect_name')
+          .ilike('architect_name', `${account_number}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (!ledgerError && ledgerRow?.architect_name) {
+          setInfluencerName(formatArchitectDisplayName(ledgerRow.architect_name));
+          return;
+        }
+
         const { data, error } = await supabase
           .from('master_architect')
           .select('influencer_name')
@@ -58,17 +71,7 @@ const MainLayout = ({ onLogout, account_number }) => {
           .single();
 
         if (error) throw error;
-        
-        if (data && data.influencer_name) {
-          const rawName = data.influencer_name.trim();
-          
-          // FORMATTING LOGIC: Deduplicates repeating names like "Harman Singh Harman Singh"
-          const words = rawName.split(/\s+/);
-          const uniqueWords = words.filter((word, index) => words.indexOf(word) === index);
-          const cleanName = uniqueWords.join(' ');
-
-          setInfluencerName(cleanName);
-        }
+        if (data?.influencer_name) setInfluencerName(formatArchitectDisplayName(data.influencer_name));
       } catch (error) {
         console.error('Error fetching data from master_architect:', error.message);
         setInfluencerName('User');
@@ -369,7 +372,7 @@ const MainLayout = ({ onLogout, account_number }) => {
                 <Typography sx={{ fontSize: { xs: '0.75rem', sm: '0.88rem' }, fontWeight: 600, color: '#0D0D0D', lineHeight: 1.2 }}>
                   Welcome, {influencerName}
                 </Typography>
-                <Typography sx={{ fontSize: { xs: '0.62rem', sm: '0.7rem' }, color: '#666666', fontFamily: 'monospace', mt: 0.25 }}>
+                <Typography sx={{ display: 'none' }}>
                   {account_number || '—'}
                 </Typography>
               </Box>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import { formatArchitectDisplayName } from './formatArchitectDisplayName';
 import { 
   Box, 
   Typography, 
@@ -100,13 +101,18 @@ export default function ProfileSection({ account_number }) {
           return;
         }
 
-        // FORMATTING LOGIC: Clean repeating duplicate words in the name
-        let cleanName = architectRow.influencer_name || '';
-        if (cleanName) {
-          const words = cleanName.trim().split(/\s+/);
-          const uniqueWords = words.filter((word, index) => words.indexOf(word) === index);
-          cleanName = uniqueWords.join(' ');
-        }
+        // This read is UI-only: the ledger holds the display identity used by the dashboard.
+        const { data: ledgerRow, error: ledgerError } = await supabase
+          .from('commission_ledger')
+          .select('architect_name')
+          .ilike('architect_name', `${targetAccountNumber}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (ledgerError) console.error('Could not load ledger display name:', ledgerError.message);
+        const cleanName = formatArchitectDisplayName(
+          ledgerRow?.architect_name || architectRow.influencer_name
+        );
         
         setProfileData({
           ...architectRow,
@@ -219,7 +225,7 @@ export default function ProfileSection({ account_number }) {
                   <Typography noWrap sx={{ fontWeight: 700, color: '#1A1A1A', mb: 0.5, letterSpacing: '-0.02em', fontSize: '1.15rem' }}>
                     {isLoading ? <Skeleton width="60%" /> : profileData?.influencer_name}
                   </Typography>
-                  <Typography sx={{ color: '#707070', fontSize: '0.75rem', fontFamily: 'ui-monospace, monospace' }}>
+                  <Typography sx={{ display: 'none' }}>
                     {isLoading ? <Skeleton width="40%" /> : (resolvedAccountNumber || '—')}
                   </Typography>
                 </Box>

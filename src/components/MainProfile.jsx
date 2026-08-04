@@ -33,6 +33,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { supabase } from '../supabaseClient';
+import { formatArchitectDisplayName } from './formatArchitectDisplayName';
 
 // ==========================================
 // 🎨 CORPORATE PALETTE ARCHITECTURE
@@ -120,31 +121,6 @@ const bounceAnimation = keyframes`
   50% { transform: translateY(3px); }
 `;
 
-const formatArchitectName = (name) => {
-  if (!name) return '';
-  let formatted = name.trim();
-  
-  if (formatted.toUpperCase() === 'RAJUSHARMA') return 'RAJU SHARMA';
-  if (formatted.toUpperCase() === 'MASTERARCHITECT') return 'MASTER ARCHITECT';
-  
-  formatted = formatted
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
-
-  const tokens = formatted.split(/\s+/);
-  const totalLength = tokens.length;
-  if (totalLength % 2 === 0) {
-    const half = totalLength / 2;
-    const firstHalf = tokens.slice(0, half).join(' ').toUpperCase();
-    const secondHalf = tokens.slice(half).join(' ').toUpperCase();
-    if (firstHalf === secondHalf) {
-      return tokens.slice(0, half).join(' ');
-    }
-  }
-  
-  return formatted;
-};
-
 const DashboardPage = ({ account_number }) => {
   const [loading, setLoading] = useState(true);
   const [ledgerData, setLedgerData] = useState({
@@ -177,7 +153,7 @@ const DashboardPage = ({ account_number }) => {
 
         if (cData && cData.length > 0) {
           const primaryRowName = cData[0].architect_name;
-          if (primaryRowName && primaryRowName.includes('|')) resolvedName = primaryRowName.split('|')[1].trim();
+          if (primaryRowName) resolvedName = primaryRowName;
 
           cData.forEach(row => {
             const sheets = Number(row.total_eligible_sheets) || 0;
@@ -364,7 +340,7 @@ const DashboardPage = ({ account_number }) => {
                 textTransform: 'uppercase',
                 ...GOLD_GRADIENT_STYLE
               }}>
-                {formatArchitectName(ledgerData.architectName)}
+                {formatArchitectDisplayName(ledgerData.architectName)}
               </Typography>
             </Box>
 
