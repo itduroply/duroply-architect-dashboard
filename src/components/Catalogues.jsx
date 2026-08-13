@@ -142,7 +142,7 @@ export default function CatalogShowcase() {
       }}>
         <Box sx={{ width: '100%', maxWidth: '1200px', mx: 'auto' }}>
           
-            //MINIMALIST LUXURY HEADER
+            {/* MINIMALIST LUXURY HEADER */}
 
           <Box sx={{ mb: 6, mt: 2 }}>
             <Typography variant="caption" component="span" sx={{ display: 'block', mb: 0.5 }}>
@@ -153,7 +153,7 @@ export default function CatalogShowcase() {
             </Typography>
           </Box>
 
-              //GALLERY GRID
+              {/* GALLERY GRID */}
               
           <Box sx={{ 
             display: 'grid', 

@@ -36,26 +36,26 @@ const Transition = React.forwardRef(function Transition(props, ref) {
 const cleanWorkspaceTheme = createTheme({
   palette: {
     mode: 'light',
-    background: { 
-      default: '#F9F8F6', 
-      paper: '#FFFFFF' 
+    background: {
+      default: '#F9F8F6',
+      paper: '#FFFFFF'
     },
-    primary: { main: '#111625' }, 
-    secondary: { main: '#C2A478' }, 
-    text: { 
-      primary: '#111625',   
-      secondary: '#6E7787'  
+    primary: { main: '#111625' },
+    secondary: { main: '#C2A478' },
+    text: {
+      primary: '#111625',
+      secondary: '#6E7787'
     },
   },
   typography: {
     fontFamily: '"Inter", "-apple-system", sans-serif',
-    h6: { 
-      fontFamily: '"Inter", sans-serif', 
-      fontWeight: 600, 
+    h6: {
+      fontFamily: '"Inter", sans-serif',
+      fontWeight: 600,
       color: '#111625',
       fontSize: '1.25rem'
     },
-    body2: { 
+    body2: {
       fontSize: '0.85rem',
       lineHeight: 1.6,
       color: '#3A4250'
@@ -72,11 +72,11 @@ const cleanWorkspaceTheme = createTheme({
 
 const formatProductDisplayCode = (rawSku) => {
   if (!rawSku) return 'UNSPECIFIED_SKU';
-  
+
   const rawStr = String(rawSku);
   const normalizedStr = rawStr.toUpperCase().replace(/[\s_]/g, '');
   const isNatureSignature = normalizedStr.includes('NATURESIGNATURE');
-  
+
   const unitLabel = isNatureSignature ? 'sq feet' : 'MM';
 
   return rawStr
@@ -89,12 +89,12 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   if (!claimProductCode || !masterSkuRows || masterSkuRows.length === 0) return null;
   const rawClaimStr = String(claimProductCode).trim().toUpperCase();
   const isDoorException = rawClaimStr.includes('DECORATIVE') || rawClaimStr.includes('DOOR') || rawClaimStr.includes('FLUSH') || rawClaimStr.startsWith('FD');
-  
-  if (!isDoorException && !/([0-9]+\s*(MM|SQ\s*FEET|SQFT))_?$/i.test(rawClaimStr)) return null; 
+
+  if (!isDoorException && !/([0-9]+\s*(MM|SQ\s*FEET|SQFT))_?$/i.test(rawClaimStr)) return null;
 
   const normalize = (str) => String(str).toUpperCase()
     .replace(/SQ\s*FEET|SQFT/g, 'MM')
-    .replace(/[\s_\-]/g, '');
+    .replace(/[\s_-]/g, '');
 
   const targetToken = normalize(rawClaimStr);
 
@@ -102,9 +102,9 @@ const executeFuzzySaaSMatch = (claimProductCode, masterSkuRows) => {
   if (match) return match;
 
   if (isDoorException) {
-    const baseClaimToken = rawClaimStr.replace(/_?\s*\d+\s*(MM|SQ\s*FEET|SQFT)_?$/i, '').replace(/[\s_\-]/g, '');
+    const baseClaimToken = rawClaimStr.replace(/_?\s*\d+\s*(MM|SQ\s*FEET|SQFT)_?$/i, '').replace(/[\s_-]/g, '');
     match = masterSkuRows.find(row => {
-      const baseMasterToken = String(row.sku).toUpperCase().replace(/ALLTHICKNESS/i, '').replace(/[\s_\-]/g, '');
+      const baseMasterToken = String(row.sku).toUpperCase().replace(/ALLTHICKNESS/i, '').replace(/[\s_-]/g, '');
       return baseMasterToken === baseClaimToken || baseClaimToken.startsWith(baseMasterToken) || baseMasterToken.startsWith(baseClaimToken);
     });
     if (match) return match;
@@ -225,7 +225,7 @@ const LocationPage = ({ account_number }) => {
 
           // Zero-sheet products are not eligible for payout and should not be shown.
           if (qty <= 0) return;
-          
+
           const matchedCatalogRow = executeFuzzySaaSMatch(rawProdSku, productSkuMaster || []);
           const rate = claim.matrix_rate !== null && claim.matrix_rate !== undefined
             ? parseFloat(claim.matrix_rate)
@@ -240,9 +240,9 @@ const LocationPage = ({ account_number }) => {
 
           if (!aggregationMap[normKey]) aggregationMap[normKey] = {};
           if (!aggregationMap[normKey][prodSku]) {
-            aggregationMap[normKey][prodSku] = { 
-              productCode: prodSku, 
-              totalQty: 0, 
+            aggregationMap[normKey][prodSku] = {
+              productCode: prodSku,
+              totalQty: 0,
               calculatedTotalValue: 0,
               basePrice: rate
             };
@@ -252,9 +252,9 @@ const LocationPage = ({ account_number }) => {
           aggregationMap[normKey][prodSku].calculatedTotalValue += computedNetLineValue;
         });
 
-        setDashboardMetrics({ 
-          pipelineNetValue: netPipelineSum, 
-          globalSheetCount: cumulativeVolumeSum 
+        setDashboardMetrics({
+          pipelineNetValue: netPipelineSum,
+          globalSheetCount: cumulativeVolumeSum
         });
 
         // 4. Inner Join: Filter out leads that do not exist in commission_ledger
@@ -331,10 +331,10 @@ const LocationPage = ({ account_number }) => {
 
       if (error) throw error;
 
-      setToast({ 
-        open: true, 
-        message: 'Query submitted successfully! You can see status in Help Desk.', 
-        severity: 'success' 
+      setToast({
+        open: true,
+        message: 'Query submitted successfully! You can see status in Help Desk.',
+        severity: 'success'
       });
 
       setIsModalOpen(false);
@@ -367,7 +367,7 @@ const LocationPage = ({ account_number }) => {
     <ThemeProvider theme={cleanWorkspaceTheme}>
       <CssBaseline />
       <Box sx={{ width: '100%', maxWidth: '950px', mx: 'auto', px: { xs: 2, sm: 3 }, pt: 2 }}>
-        
+
         {/* TOP BANNER */}
         <Paper
           elevation={0}
@@ -437,21 +437,21 @@ const LocationPage = ({ account_number }) => {
         </Paper>
 
         {/* METRICS BAR */}
-        <Box sx={{ 
-          display: 'flex', 
+        <Box sx={{
+          display: 'flex',
           flexDirection: { xs: 'column', md: 'row' },
           width: '100%',
           justifyContent: 'space-between',
           alignItems: { xs: 'stretch', md: 'center' },
           gap: { xs: 2.5, md: 2 },
-          pb: 3, 
-          borderBottom: '1px solid #EFECE8', 
+          pb: 3,
+          borderBottom: '1px solid #EFECE8',
           mb: 3
         }}>
-          <Box sx={{ 
-            display: 'flex', 
-            flexDirection: { xs: 'column', sm: 'row' }, 
-            gap: { xs: 2.5, sm: 0 }, 
+          <Box sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: { xs: 2.5, sm: 0 },
             width: '100%'
           }}>
             <Box sx={{ flex: 1, minWidth: '140px' }}>
@@ -460,27 +460,27 @@ const LocationPage = ({ account_number }) => {
                 ₹{dashboardMetrics.pipelineNetValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </Typography>
             </Box>
-            
-            <Box sx={{ 
-              flex: 1, 
+
+            <Box sx={{
+              flex: 1,
               minWidth: '140px',
-              pl: { xs: 0, sm: 4 }, 
+              pl: { xs: 0, sm: 4 },
               pt: { xs: 2, sm: 0 },
-              borderLeft: { xs: 'none', sm: '1px solid #EFECE8' }, 
+              borderLeft: { xs: 'none', sm: '1px solid #EFECE8' },
               borderTop: { xs: '1px solid #EFECE8', sm: 'none' }
             }}>
               <Typography variant="caption" sx={{ display: 'block', mb: 0.6 }}>Total Sheets Delivered</Typography>
               <Typography variant="h6" sx={{ fontWeight: 500, fontSize: { xs: '1.25rem', sm: '1.4rem' } }}>
-                {dashboardMetrics.globalSheetCount.toLocaleString()} 
+                {dashboardMetrics.globalSheetCount.toLocaleString()}
               </Typography>
             </Box>
 
-            <Box sx={{ 
-              flex: 1, 
+            <Box sx={{
+              flex: 1,
               minWidth: '140px',
-              pl: { xs: 0, sm: 4 }, 
+              pl: { xs: 0, sm: 4 },
               pt: { xs: 2, sm: 0 },
-              borderLeft: { xs: 'none', sm: '1px solid #EFECE8' }, 
+              borderLeft: { xs: 'none', sm: '1px solid #EFECE8' },
               borderTop: { xs: '1px solid #EFECE8', sm: 'none' }
             }}>
               <Typography variant="caption" sx={{ display: 'block', mb: 0.6 }}>Project Sites</Typography>
@@ -549,19 +549,19 @@ const LocationPage = ({ account_number }) => {
             {liveFilteredList.map((site) => {
               const locationDetails = [site.city, site.district, site.state, site.pincode].filter(Boolean).join(', ');
               const fullAddress = site.address || '';
-              const isSiteOpen = openSites[site.lead_id] ?? false; 
+              const isSiteOpen = openSites[site.lead_id] ?? false;
 
               return (
                 <Box key={site.lead_id} sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                  
+
                   {/* Lead Heading Row */}
-                  <Box 
+                  <Box
                     onClick={() => toggleSite(site.lead_id)}
-                    sx={{ 
-                      display: 'flex', 
-                      flexDirection: { xs: 'column', sm: 'row' }, 
-                      justifyContent: 'space-between', 
-                      alignItems: { xs: 'flex-start', sm: 'center' }, 
+                    sx={{
+                      display: 'flex',
+                      flexDirection: { xs: 'column', sm: 'row' },
+                      justifyContent: 'space-between',
+                      alignItems: { xs: 'flex-start', sm: 'center' },
                       gap: { xs: 1.5, sm: 2 },
                       mb: 2,
                       pb: 1.5,
@@ -592,15 +592,15 @@ const LocationPage = ({ account_number }) => {
                         </Typography>
                       </Box>
 
-                      <Box 
-                        sx={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: 0.75, 
-                          px: 1.75, 
-                          py: 0.75, 
-                          borderRadius: '20px', 
-                          bgcolor: isSiteOpen ? '#111625' : '#F4F1EA', 
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                          px: 1.75,
+                          py: 0.75,
+                          borderRadius: '20px',
+                          bgcolor: isSiteOpen ? '#111625' : '#F4F1EA',
                           color: isSiteOpen ? '#FFFFFF' : '#111625',
                           border: isSiteOpen ? '1px solid #111625' : '1px solid #E5E2DE',
                           transition: 'all 0.2s ease-in-out',
@@ -622,12 +622,12 @@ const LocationPage = ({ account_number }) => {
 
                   {/* Collapsible Content */}
                   <Collapse in={isSiteOpen} timeout="auto" unmountOnExit={false}>
-                    <Box 
-                      sx={{ 
-                        p: 2, 
-                        mb: 2.5, 
-                        bgcolor: '#FFFFFF', 
-                        borderRadius: '8px', 
+                    <Box
+                      sx={{
+                        p: 2,
+                        mb: 2.5,
+                        bgcolor: '#FFFFFF',
+                        borderRadius: '8px',
                         border: '1px solid #EFECE8',
                         borderLeft: '4px solid #111625',
                         display: 'flex',
@@ -660,10 +660,10 @@ const LocationPage = ({ account_number }) => {
 
                           {site.breakdown.map((prod, idx) => {
                             return (
-                              <Box 
-                                key={idx} 
-                                sx={{ 
-                                  display: 'flex', 
+                              <Box
+                                key={idx}
+                                sx={{
+                                  display: 'flex',
                                   alignItems: 'center',
                                   py: 1.5,
                                   borderBottom: '1px solid #EFECE8',
@@ -749,7 +749,7 @@ const LocationPage = ({ account_number }) => {
 
           <DialogContent sx={{ p: 3, pt: 2 }}>
             <Box component="form" onSubmit={handleFormSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
-              
+
               <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                 <TextField
                   label="Contact Name"
