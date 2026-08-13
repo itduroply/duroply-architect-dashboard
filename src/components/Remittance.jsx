@@ -2,45 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { 
-  Box, 
-  Typography, 
-  Button, 
-  Card, 
-  CardContent, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow, 
-  Paper, 
-  Dialog, 
-  DialogTitle, 
-  DialogContent, 
-  DialogActions, 
-  TextField, 
-  CircularProgress, 
-  IconButton, 
-  Chip, 
-  Stack,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Alert,
-} from '@mui/material';
-import { 
-  AccountBalanceWallet, 
-  CheckCircle, 
-  AccessTime, 
-  GetApp, 
-  Close, 
-  ArrowForward, 
-  Security, 
-  NotificationsActive,
-  InfoOutlined
-} from '@mui/icons-material';
+import {  Box,  Typography,  Button,  Card,  CardContent,  Table,  TableBody,  TableCell,  TableContainer,  TableHead,  TableRow, 
+  Paper,  Dialog,  DialogTitle,  DialogContent,  DialogActions,  TextField,  CircularProgress,  IconButton,  Chip, 
+  Stack, FormControl,  InputLabel,  Select,  MenuItem,  Alert,} from '@mui/material';
+import {  AccountBalanceWallet,  CheckCircle,  AccessTime,  GetApp,  Close,  ArrowForward,  Security,  NotificationsActive, InfoOutlined} from '@mui/icons-material';
 
 export default function Analytics({ account_number }) {
   const [remittances, setRemittances] = useState([]);
@@ -94,7 +59,7 @@ export default function Analytics({ account_number }) {
       // 1. Fetch remittances along with transaction_id
       const { data: remittanceData, error: remError } = await supabase
         .from('remittances')
-        .select('id, architect_name, utr, status, amount, payment_mode, done_payment_date, transaction_id')
+        .select('id, architect_name, utr, status, amount, payment_mode, done_payment_date, transaction_id, created_at')
         .eq('account_number', account_number);
 
       if (remError) throw remError;
@@ -112,7 +77,7 @@ export default function Analytics({ account_number }) {
       // 3. Fetch payout_request along with id
       const { data: payoutData, error: payError } = await supabase
         .from('payout_request')
-        .select('id, architect_name, payout_amount, status')
+        .select('id, architect_name, payout_amount, status, created_at')
         .eq('account_identity', account_number);
 
       if (payError) throw payError;
@@ -219,7 +184,8 @@ export default function Analytics({ account_number }) {
     const pendingPayouts = payoutRequests.filter(item => item.status === 'Queue');
     pendingPayouts.forEach(item => {
       list.push({
-        date: 'Awaiting Settlement',
+        // A payout request is a claim raised by the architect; show when it was raised.
+        date: item.created_at || 'Unspecified Date',
         type: 'pending',
         label: 'Under Process',
         amount: Number(item.payout_amount || 0)
@@ -229,7 +195,7 @@ export default function Analytics({ account_number }) {
     const pendingRemittances = remittances.filter(item => item.status === 'Pending');
     pendingRemittances.forEach(item => {
       list.push({
-        date: 'Awaiting Settlement',
+        date: item.created_at || 'Unspecified Date',
         type: 'pending',
         label: 'Under Process',
         amount: Number(item.amount || 0)
@@ -258,7 +224,7 @@ export default function Analytics({ account_number }) {
           utr: 'Awaiting Verification',
           payment_mode: 'Processing Pipeline',
           status: 'Under Process',
-          done_payment_date: 'Awaiting Settlement',
+          claim_date: item.created_at || 'Unspecified Date',
           amount: item.payout_amount
         }));
 
@@ -270,7 +236,7 @@ export default function Analytics({ account_number }) {
           utr: item.utr || 'Awaiting Allocation',
           payment_mode: item.payment_mode || 'Digital Transfer',
           status: 'Under Process',
-          done_payment_date: 'Awaiting Settlement',
+          claim_date: item.created_at || 'Unspecified Date',
           amount: item.amount
         }));
 
@@ -748,7 +714,7 @@ export default function Analytics({ account_number }) {
                     return (
                       <TableRow key={idx} sx={{ '&:hover': { bgcolor: '#FDFBF7' } }}>
                         <TableCell sx={{ fontSize: '12px', color: '#64748b', py: 1.5, pl: 3 }}>
-                          {isPending ? 'Awaiting Settlement' : formatTo2026CustomDate(item.date)}
+                          {formatTo2026CustomDate(item.date)}
                         </TableCell>
                         <TableCell sx={{ fontSize: '13px', fontWeight: 500, color: '#0f172a', py: 1.5 }}>
                           {isPending ? (
@@ -786,7 +752,7 @@ export default function Analytics({ account_number }) {
                   targetViewDataset.map((item, idx) => (
                     <TableRow key={idx} sx={{ '&:hover': { bgcolor: '#FDFBF7' } }}>
                       <TableCell sx={{ fontSize: '12px', color: '#64748b', py: 1.5, pl: 3 }}>
-                        Awaiting Settlement
+                        {formatTo2026CustomDate(item.claim_date)}
                       </TableCell>
                       <TableCell sx={{ py: 1.5 }}>
                         <Chip 

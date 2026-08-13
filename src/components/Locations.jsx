@@ -222,6 +222,9 @@ const LocationPage = ({ account_number }) => {
           const rawProdSku = claim.product_sku || 'UNSPECIFIED_SKU';
           const prodSku = formatProductDisplayCode(rawProdSku);
           const qty = parseFloat(claim.total_eligible_sheets) || 0;
+
+          // Zero-sheet products are not eligible for payout and should not be shown.
+          if (qty <= 0) return;
           
           const matchedCatalogRow = executeFuzzySaaSMatch(rawProdSku, productSkuMaster || []);
           const rate = claim.matrix_rate !== null && claim.matrix_rate !== undefined

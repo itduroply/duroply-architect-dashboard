@@ -1,31 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
 import { formatArchitectDisplayName } from './formatArchitectDisplayName';
-import { 
-  Box, 
-  Typography, 
-  Avatar, 
-  Stack,
-  Paper,
-  Skeleton,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableRow,
-  ThemeProvider,
-  createTheme,
-  CssBaseline
-} from '@mui/material';
-import { 
-  PhoneOutlined as Phone, 
-  LocationOnOutlined as LocationOn, 
-  StorefrontOutlined as Storefront, 
-  Fingerprint, 
-  CalendarMonthOutlined as CalendarMonth, 
-  VerifiedUserOutlined as VerifiedUser
-} from '@mui/icons-material';
+import {  Box,  Typography,  Avatar,  Stack, Paper, Skeleton, Alert, Table, TableBody, TableCell,
+  TableContainer, TableRow, ThemeProvider, createTheme, CssBaseline} from '@mui/material';
+import {  PhoneOutlined as Phone,  LocationOnOutlined as LocationOn,  StorefrontOutlined as Storefront, 
+  Fingerprint,  CalendarMonthOutlined as CalendarMonth,  VerifiedUserOutlined as VerifiedUser} from '@mui/icons-material';
 
 
 // 🎨 LIGHT LUXURY CORPORATE EDITORIAL THEME
@@ -172,7 +151,7 @@ export default function ProfileSection({ account_number }) {
         <Stack spacing={2} sx={{ width: '100%', maxWidth: '1200px' }}>
           
           
-             // 📦 ROW 01: 50/50 SYMMETRICAL IDENTITY & TIMELINE ROW
+              {/* 📦 ROW 01: 50/50 SYMMETRICAL IDENTITY & TIMELINE ROW */}
              
           <Box 
             sx={{ 
