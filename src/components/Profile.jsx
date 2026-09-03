@@ -270,8 +270,8 @@ export default function ProfileSection({ account_number }) {
               <Table size="small" sx={{ borderCollapse: 'collapse' }}>
                 <TableBody>
                   {[
-                    { icon: <Fingerprint sx={{ fontSize: 16, color: '#B89047' }} />, label: "Account Identity Token", value: profileData?.account_identity, mono: true },
-                    { icon: <Phone sx={{ fontSize: 16, color: '#B89047' }} />, label: "Registered Mobile Reference", value: profileData?.mobile_number, mono: true },
+                    { icon: <Fingerprint sx={{ fontSize: 16, color: '#B89047' }} />, label: "Account Id", value: profileData?.account_identity, mono: true },
+                    { icon: <Phone sx={{ fontSize: 16, color: '#B89047' }} />, label: "Registered Mobile", value: profileData?.mobile_number, mono: true },
                     { icon: <Storefront sx={{ fontSize: 16, color: '#B89047' }} />, label: "Dealers Location", value: profileData?.current_dealer, mono: false },
                     { icon: <LocationOn sx={{ fontSize: 16, color: '#B89047' }} />, label: "Market City", value: profileData?.market_city, mono: false }
                   ].map((row, index) => (

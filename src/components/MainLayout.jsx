@@ -98,8 +98,8 @@ const MainLayout = ({ onLogout, account_number }) => {
     { path: '/remittance', label: 'Payments', icon: <FaExchangeAlt /> },
     { path: '/locations', label: 'Site Details', icon: <FaMapMarkerAlt /> },
     { path: '/catalogues', label: 'Catalogues', icon: <FaBookOpen /> },
-    { path: '/query', label: 'Help Desk', icon: <BiSupport /> },
-    { path: '/master', label: 'Sheet Price', icon: <FaCog /> },
+    { path: '/query', label: 'Support', icon: <BiSupport /> },
+    { path: '/master', label: 'Payout Structure', icon: <FaCog /> },
     { path: '/profile', label: 'Profile', icon: <FaUser /> },
   ];
 

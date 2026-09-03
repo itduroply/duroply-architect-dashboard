@@ -21,6 +21,14 @@ export default function Analytics({ account_number }) {
   const [formError, setFormError] = useState('');
   const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
+  // OTP confirmation step for payout submission
+  const [otpStep, setOtpStep] = useState(false);
+  const [pendingMobile, setPendingMobile] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
   const formatTo2026CustomDate = useCallback((dateStr) => {
     if (!dateStr || dateStr === 'Unspecified Date' || dateStr === 'Awaiting Settlement') {
       return dateStr === 'Awaiting Settlement' ? 'Awaiting Settlement' : '—';
@@ -258,11 +266,32 @@ export default function Analytics({ account_number }) {
     setNotification(prev => ({ ...prev, show: false }));
   };
 
-  const handlePayoutSubmit = async (e) => {
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const resetPayoutModal = () => {
+    setPayoutAmount('');
+    setFormError('');
+    setOtpStep(false);
+    setOtp('');
+    setOtpError('');
+    setPendingMobile('');
+    setResendCooldown(0);
+  };
+
+  // Step 1: validate the requested amount against the live balance (same
+  // checks as before), then send an OTP to the architect's registered
+  // mobile number instead of submitting the payout request directly.
+  const handleRequestOtp = async (e) => {
     e.preventDefault();
     if (submitting) return;
     setFormError('');
-    
+
     const numericAmount = parseFloat(payoutAmount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
       setFormError('Please input a valid capital distribution figure.');
@@ -283,7 +312,7 @@ export default function Analytics({ account_number }) {
         .from('remittances')
         .select('amount, status')
         .eq('account_number', account_number);
-      
+
       const { data: masterArchData, error: masterArchErr } = await supabase
         .from('master_architect')
         .select('mobile_number')
@@ -293,7 +322,7 @@ export default function Analytics({ account_number }) {
         const currentPaid = (freshRemits || [])
           .filter(i => i.status === 'Paid')
           .reduce((s, i) => s + Number(i.amount || 0), 0);
-        
+
         const pendingPayoutsSum = (freshPayouts || [])
           .filter(i => i.status === 'Queue')
           .reduce((s, i) => s + Number(i.payout_amount || 0), 0);
@@ -320,6 +349,63 @@ export default function Analytics({ account_number }) {
 
       const linkedMobileNumber = masterArchData && masterArchData.length > 0 ? masterArchData[0].mobile_number : null;
 
+      if (!linkedMobileNumber) {
+        setFormError('Registered mobile number not found for this account. Please contact administrator.');
+        setSubmitting(false);
+        return;
+      }
+
+      const { data, error: fnError } = await supabase.functions.invoke('architect-send-otp', {
+        body: { mobile_number: linkedMobileNumber, purpose: 'payout' },
+      });
+
+      if (fnError) throw fnError;
+
+      if (!data.success) {
+        setFormError(data.error || 'Unable to send OTP. Please try again.');
+        setSubmitting(false);
+        return;
+      }
+
+      setPendingMobile(linkedMobileNumber);
+      setOtp('');
+      setOtpError('');
+      setOtpStep(true);
+      setResendCooldown(30);
+    } catch (error) {
+      setFormError(error.message || 'Write execution failure on ledger database.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Step 2: verify the OTP, then run the exact same payout_request insert
+  // that used to run directly off the "Confirm Clear" click.
+  const handleVerifyAndSubmitPayout = async (e) => {
+    e.preventDefault();
+    setOtpError('');
+
+    const cleanOtp = otp.trim();
+    if (!cleanOtp) {
+      setOtpError('OTP is required to proceed');
+      return;
+    }
+
+    const numericAmount = parseFloat(payoutAmount);
+    setOtpLoading(true);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('architect-verify-otp', {
+        body: { mobile_number: pendingMobile, otp: cleanOtp, purpose: 'payout' },
+      });
+
+      if (fnError) throw fnError;
+
+      if (!data.success) {
+        setOtpError(data.error || 'Invalid OTP. Please try again.');
+        return;
+      }
+
       const { error } = await supabase
         .from('payout_request')
         .insert([{
@@ -327,19 +413,44 @@ export default function Analytics({ account_number }) {
           architect_name: financialMetrics.primaryArchitectName,
           payout_amount: numericAmount,
           status: 'Queue',
-          mobile_no: linkedMobileNumber
+          mobile_no: pendingMobile
         }]);
 
       if (error) throw error;
 
       setIsModalOpen(false);
-      setPayoutAmount('');
+      resetPayoutModal();
       showToast('Your payout request has been successfully submitted and will be solved within 2 to 3 working days.');
       await fetchAnalyticsData();
     } catch (error) {
-      setFormError(error.message || 'Write execution failure on ledger database.');
+      setOtpError(error.message || 'Write execution failure on ledger database.');
     } finally {
-      setSubmitting(false);
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendPayoutOtp = async () => {
+    if (resendCooldown > 0) return;
+    setOtpError('');
+    setOtpLoading(true);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('architect-send-otp', {
+        body: { mobile_number: pendingMobile, purpose: 'payout' },
+      });
+
+      if (fnError) throw fnError;
+
+      if (!data.success) {
+        setOtpError(data.error || 'Unable to resend OTP. Please try again.');
+        return;
+      }
+
+      setResendCooldown(30);
+    } catch (error) {
+      setOtpError('A connection error occurred. Please try again.');
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -806,119 +917,180 @@ export default function Analytics({ account_number }) {
         open={isModalOpen} 
         fullWidth
         maxWidth="sm"
-        onClose={() => { if (!submitting) { setIsModalOpen(false); setFormError(''); setPayoutAmount(''); } }}
+        onClose={() => { if (!submitting && !otpLoading) { setIsModalOpen(false); resetPayoutModal(); } }}
         PaperProps={{ sx: { borderRadius: '16px', p: 1, maxHeight: '90vh', overflowY: 'auto' } }}
       >
         <DialogTitle sx={{ m: 0, p: 3, pb: 2, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <Box>
             <Typography sx={{ fontSize: '18px', fontWeight: 600, color: '#0f172a' }}>
-              Authorize Settlement Disbursal
+              {otpStep ? 'Verify OTP to Confirm' : 'Authorize Settlement Disbursal'}
             </Typography>
           </Box>
-          <IconButton disabled={submitting} onClick={() => { setIsModalOpen(false); setFormError(''); setPayoutAmount(''); }} sx={{ color: '#94a3b8' }}>
+          <IconButton disabled={submitting || otpLoading} onClick={() => { setIsModalOpen(false); resetPayoutModal(); }} sx={{ color: '#94a3b8' }}>
             <Close sx={{ fontSize: '18px' }} />
           </IconButton>
         </DialogTitle>
 
         <DialogContent dividers sx={{ borderColor: 'rgba(15, 23, 42, 0.05)', p: 3, display: 'flex', flexDirection: 'column', gap: 2.5, overflowY: 'visible' }}>
-          
-          <Box sx={{ display: 'flex', gap: 1.5, bgcolor: '#fef3c7', p: 2, borderRadius: '8px', border: '1px solid #fde68a' }}>
-            <InfoOutlined sx={{ color: '#b45309', fontSize: '18px', mt: 0.2 }} />
-            <Box>
-              <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#92400e', mb: 0.5 }}>
-                Tax Deduction Notice
-              </Typography>
-              <Typography sx={{ fontSize: '11.5px', color: '#b45309', fontWeight: 500, lineHeight: 1.4 }}>
-               10% TDS will be automatically deducted from the requested amount (applicable for each FY) as per government regulation.
-              </Typography>
-            </Box>
-          </Box>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-            <Box>
-              <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em', mb: 1 }}>BENEFICIARY NAME</Typography>
-              <TextField fullWidth variant="outlined" value={financialMetrics.primaryArchitectName} disabled InputProps={{ style: { fontSize: 13, background: '#F8F6F0', borderRadius: '8px' } }} sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }} />
-            </Box>
+          {!otpStep ? (
+            <>
+              <Box sx={{ display: 'flex', gap: 1.5, bgcolor: '#fef3c7', p: 2, borderRadius: '8px', border: '1px solid #fde68a' }}>
+                <InfoOutlined sx={{ color: '#b45309', fontSize: '18px', mt: 0.2 }} />
+                <Box>
+                  <Typography sx={{ fontSize: '12px', fontWeight: 700, color: '#92400e', mb: 0.5 }}>
+                    Tax Deduction Notice
+                  </Typography>
+                  <Typography sx={{ fontSize: '11.5px', color: '#b45309', fontWeight: 500, lineHeight: 1.4 }}>
+                   10% TDS will be automatically deducted from the requested amount (applicable for each FY) as per government regulation.
+                  </Typography>
+                </Box>
+              </Box>
 
-            <Box>
-              <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em', mb: 1 }}>ACCOUNT IDENTITY REFERENCE</Typography>
-              <TextField fullWidth variant="outlined" value={account_number} disabled InputProps={{ style: { fontSize: 13, fontFamily: 'monospace', background: '#F8F6F0', borderRadius: '8px' } }} sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }} />
-            </Box>
-          </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                <Box>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em', mb: 1 }}>BENEFICIARY NAME</Typography>
+                  <TextField fullWidth variant="outlined" value={financialMetrics.primaryArchitectName} disabled InputProps={{ style: { fontSize: 13, background: '#F8F6F0', borderRadius: '8px' } }} sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }} />
+                </Box>
 
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em' }}>WITHDRAWAL AMOUNT (INR)</Typography>
-              <Typography sx={{ fontSize: '11px', color: '#0f172a', fontWeight: 700, ml: 'auto' }}>Max Pool: ₹{financialMetrics.netAvailableBalance.toLocaleString('en-IN')}</Typography>
-            </Box>
-            <TextField 
-              fullWidth 
-              variant="outlined"
-              type="number"
-              placeholder="0.00"
-              disabled={submitting}
-              value={payoutAmount}
-              onChange={(e) => setPayoutAmount(e.target.value)}
-              InputProps={{
-                startAdornment: <Typography sx={{ fontSize: 14, fontWeight: 600, color: '#94a3b8', mr: 0.5 }}>₹</Typography>,
-                style: { fontSize: 14, fontWeight: 600, color: '#0f172a', borderRadius: '8px' }
-              }}
-            />
+                <Box>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em', mb: 1 }}>ACCOUNT IDENTITY REFERENCE</Typography>
+                  <TextField fullWidth variant="outlined" value={account_number} disabled InputProps={{ style: { fontSize: 13, fontFamily: 'monospace', background: '#F8F6F0', borderRadius: '8px' } }} sx={{ '& .MuiOutlinedInput-notchedOutline': { border: 'none' } }} />
+                </Box>
+              </Box>
 
-            {/* Quick Amount Option Chips */}
-            <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 0.5 }}>
-              {[5000, 10000, 20000].map((val) => (
-                <Chip
-                  key={val}
-                  label={`₹${val.toLocaleString('en-IN')}`}
-                  clickable
+              <Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography sx={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.08em' }}>WITHDRAWAL AMOUNT (INR)</Typography>
+                  <Typography sx={{ fontSize: '11px', color: '#0f172a', fontWeight: 700, ml: 'auto' }}>Max Pool: ₹{financialMetrics.netAvailableBalance.toLocaleString('en-IN')}</Typography>
+                </Box>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  type="number"
+                  placeholder="0.00"
                   disabled={submitting}
-                  onClick={() => setPayoutAmount(val.toString())}
-                  sx={{ 
-                    borderRadius: '6px', 
-                    fontSize: '11px', 
-                    fontWeight: 600, 
-                    bgcolor: payoutAmount === val.toString() ? '#0f172a' : '#f1f5f9',
-                    color: payoutAmount === val.toString() ? '#ffffff' : '#334155',
-                    '&:hover': { bgcolor: payoutAmount === val.toString() ? '#0f172a' : '#e2e8f0' }
+                  value={payoutAmount}
+                  onChange={(e) => setPayoutAmount(e.target.value)}
+                  InputProps={{
+                    startAdornment: <Typography sx={{ fontSize: 14, fontWeight: 600, color: '#94a3b8', mr: 0.5 }}>₹</Typography>,
+                    style: { fontSize: 14, fontWeight: 600, color: '#0f172a', borderRadius: '8px' }
                   }}
                 />
-              ))}
-              <Chip
-                label="All"
-                clickable
-                disabled={submitting}
-                onClick={() => setPayoutAmount(financialMetrics.netAvailableBalance.toString())}
-                sx={{ 
-                  borderRadius: '6px', 
-                  fontSize: '11px', 
-                  fontWeight: 700, 
-                  bgcolor: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#0f172a' : '#e0f2fe',
-                  color: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#ffffff' : '#0369a1',
-                  '&:hover': { bgcolor: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#0f172a' : '#bae6fd' }
-                }}
-              />
-            </Stack>
-          </Box>
 
-          {formError && (
-            <Alert severity="error" icon={false} sx={{ borderRadius: '8px', fontSize: '12px', mt: 0.5 }}>
-              {formError}
-            </Alert>
+                {/* Quick Amount Option Chips */}
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 0.5 }}>
+                  {[5000, 10000, 20000].map((val) => (
+                    <Chip
+                      key={val}
+                      label={`₹${val.toLocaleString('en-IN')}`}
+                      clickable
+                      disabled={submitting}
+                      onClick={() => setPayoutAmount(val.toString())}
+                      sx={{
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        bgcolor: payoutAmount === val.toString() ? '#0f172a' : '#f1f5f9',
+                        color: payoutAmount === val.toString() ? '#ffffff' : '#334155',
+                        '&:hover': { bgcolor: payoutAmount === val.toString() ? '#0f172a' : '#e2e8f0' }
+                      }}
+                    />
+                  ))}
+                  <Chip
+                    label="All"
+                    clickable
+                    disabled={submitting}
+                    onClick={() => setPayoutAmount(financialMetrics.netAvailableBalance.toString())}
+                    sx={{
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      bgcolor: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#0f172a' : '#e0f2fe',
+                      color: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#ffffff' : '#0369a1',
+                      '&:hover': { bgcolor: payoutAmount === financialMetrics.netAvailableBalance.toString() ? '#0f172a' : '#bae6fd' }
+                    }}
+                  />
+                </Stack>
+              </Box>
+
+              {formError && (
+                <Alert severity="error" icon={false} sx={{ borderRadius: '8px', fontSize: '12px', mt: 0.5 }}>
+                  {formError}
+                </Alert>
+              )}
+            </>
+          ) : (
+            <>
+              <Typography sx={{ fontSize: '13px', color: '#475569' }}>
+                Enter the 6-digit code sent to <strong>{pendingMobile}</strong> to confirm this ₹{parseFloat(payoutAmount || '0').toLocaleString('en-IN')} withdrawal request.
+              </Typography>
+
+              <TextField
+                fullWidth
+                variant="outlined"
+                placeholder="Enter 6-digit OTP"
+                disabled={otpLoading}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                inputProps={{ inputMode: 'numeric', maxLength: 6 }}
+                InputProps={{ style: { fontSize: 14, fontWeight: 600, color: '#0f172a', borderRadius: '8px' } }}
+              />
+
+              {otpError && (
+                <Alert severity="error" icon={false} sx={{ borderRadius: '8px', fontSize: '12px' }}>
+                  {otpError}
+                </Alert>
+              )}
+
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <Button
+                  disabled={otpLoading}
+                  onClick={() => { setOtpStep(false); setOtp(''); setOtpError(''); }}
+                  sx={{ textTransform: 'none', fontSize: '12px', fontWeight: 600, color: '#64748b', p: 0, minWidth: 'auto' }}
+                >
+                  Change amount
+                </Button>
+                <Button
+                  disabled={otpLoading || resendCooldown > 0}
+                  onClick={handleResendPayoutOtp}
+                  sx={{ textTransform: 'none', fontSize: '12px', fontWeight: 600, color: '#0f172a', p: 0, minWidth: 'auto' }}
+                >
+                  {resendCooldown > 0 ? `Resend OTP (${resendCooldown}s)` : 'Resend OTP'}
+                </Button>
+              </Box>
+            </>
           )}
         </DialogContent>
 
         <DialogActions sx={{ p: 3, pt: 2, gap: 2 }}>
-          <Button disabled={submitting} onClick={() => { setIsModalOpen(false); setFormError(''); setPayoutAmount(''); }} sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Cancel</Button>
-          <Button 
-            variant="contained"
-            disabled={submitting}
-            onClick={handlePayoutSubmit}
-            endIcon={submitting ? <CircularProgress size={16} /> : <ArrowForward />}
-            sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, py: 1.2, borderRadius: '8px', background: '#0f172a' }}
-          >
-            {submitting ? 'Verifying...' : 'Confirm Clear'}
-          </Button>
+          {!otpStep ? (
+            <>
+              <Button disabled={submitting} onClick={() => { setIsModalOpen(false); resetPayoutModal(); }} sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Cancel</Button>
+              <Button
+                variant="contained"
+                disabled={submitting}
+                onClick={handleRequestOtp}
+                endIcon={submitting ? <CircularProgress size={16} /> : <ArrowForward />}
+                sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, py: 1.2, borderRadius: '8px', background: '#0f172a' }}
+              >
+                {submitting ? 'Sending OTP...' : 'Confirm Clear'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button disabled={otpLoading} onClick={() => { setIsModalOpen(false); resetPayoutModal(); }} sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Cancel</Button>
+              <Button
+                variant="contained"
+                disabled={otpLoading}
+                onClick={handleVerifyAndSubmitPayout}
+                endIcon={otpLoading ? <CircularProgress size={16} /> : <ArrowForward />}
+                sx={{ flex: 1, textTransform: 'none', fontSize: '13px', fontWeight: 600, py: 1.2, borderRadius: '8px', background: '#0f172a' }}
+              >
+                {otpLoading ? 'Verifying...' : 'Verify & Submit'}
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

@@ -11,7 +11,14 @@ const LoginPage = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   // Tracks why access was blocked: 'not_registered' or 'ineligible'
-  const [denialReason, setDenialReason] = useState(''); 
+  const [denialReason, setDenialReason] = useState('');
+
+  // OTP step state
+  const [step, setStep] = useState('mobile'); // 'mobile' | 'otp'
+  const [otp, setOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   useEffect(() => {
     const savedArchitect = localStorage.getItem('architect_session');
@@ -27,10 +34,21 @@ const LoginPage = ({ onLoginSuccess }) => {
     }
   }, [onLoginSuccess]);
 
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  // Step 1: mobile number check (same master_architect + commission_ledger
+  // eligibility rules as before) now runs inside the architect-send-otp
+  // edge function; on success it sends the OTP and moves to the OTP step.
   const handleSignIn = async (e) => {
     e.preventDefault();
     setError('');
-    
+
     const cleanMobile = mobile.trim();
     if (!cleanMobile) {
       setError('Mobile number is required to proceed');
@@ -40,72 +58,101 @@ const LoginPage = ({ onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      // 1. Locate the master architect profile (Removed is_active check)
-      const { data: architectData, error: dbError } = await supabase
-        .from('master_architect')
-        .select('*')
-        .eq('mobile_number', cleanMobile)
-        .maybeSingle();
+      const { data, error: fnError } = await supabase.functions.invoke('architect-send-otp', {
+        body: { mobile_number: cleanMobile },
+      });
 
-      if (dbError) throw dbError;
+      if (fnError) throw fnError;
 
-      if (!architectData) {
-        setDenialReason('not_registered');
-        setShowModal(true);
-        setLoading(false);
+      if (!data.success) {
+        if (data.denialReason) {
+          setDenialReason(data.denialReason);
+          setShowModal(true);
+        } else {
+          setError(data.error || 'Unable to send OTP. Please try again.');
+        }
         return;
       }
 
-      // 2. Extract account number and verify ledger eligibility
-      const targetAccountNumber = architectData.account_number;
-      
-      if (!targetAccountNumber) {
-        setError('Profile error: Associated account number not found.');
-        setLoading(false);
-        return;
-      }
-
-      // Queries rows where architect_name contains the account number string (e.g. "2511001131 | Rajusharma")
-      const { data: ledgerRows, error: ledgerError } = await supabase
-        .from('commission_ledger')
-        .select('status, architect_name')
-        .ilike('architect_name', `%${targetAccountNumber}%`);
-
-      if (ledgerError) throw ledgerError;
-
-      // Check if any matching ledger record is confirmed as 'eligible'
-      const isEligibleUser = ledgerRows && ledgerRows.length > 0 && ledgerRows.some(
-        row => row.status && row.status.trim().toLowerCase() === 'eligible'
-      );
-
-      if (!isEligibleUser) {
-        setDenialReason('ineligible');
-        setShowModal(true);
-        setLoading(false);
-        return;
-      }
-
-      // 3. Update the last_login timestamp on successful clearance
-      const { error: updateError } = await supabase
-        .from('master_architect')
-        .update({ last_login: new Date().toISOString() }) 
-        .eq('mobile_number', cleanMobile);
-
-      if (updateError) {
-        console.error('Failed to update last_login:', updateError);
-      }
-
-      // 4. Proceed with successful portal entry
-      if (onLoginSuccess) {
-        onLoginSuccess(architectData);
-      }
-
+      setOtp('');
+      setOtpError('');
+      setStep('otp');
+      setResendCooldown(30);
     } catch (err) {
       console.error('Authentication process exception:', err);
       setError('A connection error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Step 2: verify the OTP the architect received via SMS
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setOtpError('');
+
+    const cleanOtp = otp.trim();
+    if (!cleanOtp) {
+      setOtpError('OTP is required to proceed');
+      return;
+    }
+
+    setOtpLoading(true);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('architect-verify-otp', {
+        body: { mobile_number: mobile.trim(), otp: cleanOtp },
+      });
+
+      if (fnError) throw fnError;
+
+      if (!data.success) {
+        setOtpError(data.error || 'Invalid OTP. Please try again.');
+        return;
+      }
+
+      if (onLoginSuccess) {
+        onLoginSuccess(data.data);
+      }
+    } catch (err) {
+      console.error('OTP verification exception:', err);
+      setOtpError('A connection error occurred. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setOtpError('');
+    setOtpLoading(true);
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('architect-send-otp', {
+        body: { mobile_number: mobile.trim() },
+      });
+
+      if (fnError) throw fnError;
+
+      if (!data.success) {
+        setOtpError(data.error || 'Unable to resend OTP. Please try again.');
+        return;
+      }
+
+      setResendCooldown(30);
+    } catch (err) {
+      console.error('Resend OTP exception:', err);
+      setOtpError('A connection error occurred. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleChangeNumber = () => {
+    setStep('mobile');
+    setOtp('');
+    setOtpError('');
+    setResendCooldown(0);
   };
 
   return (
@@ -140,32 +187,81 @@ const LoginPage = ({ onLoginSuccess }) => {
             <img src={duroplyLogo} alt="Duroply Logo" className="brand-logo-img" />
           </div>
 
-          <div className="form-header">
-            <h2>Welcome back</h2>
-            <p>Sign in to access your secure architect portal</p>
-          </div>
-
-          <form onSubmit={handleSignIn} noValidate>
-            <div className="custom-input-group">
-              <label className="input-label">REGISTERED MOBILE NUMBER</label>
-              <div className={`input-wrapper ${error ? 'input-error-border' : ''}`}>
-                <FaMobileAlt className="field-icon" />
-                <input 
-                  type="tel" 
-                  placeholder="Enter your registered mobile" 
-                  value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  className="main-input"
-                  disabled={loading}
-                />
+          {step === 'mobile' ? (
+            <>
+              <div className="form-header">
+                <h2>Welcome back</h2>
+                <p>Sign in to access your secure architect portal</p>
               </div>
-              {error && <span className="compulsion-msg">{error}</span>}
-            </div>
 
-            <button type="submit" className="action-submit-btn" disabled={loading}>
-              {loading ? 'Verifying...' : 'Sign In'} <FaChevronRight className="btn-arrow" />
-            </button>
-          </form>
+              <form onSubmit={handleSignIn} noValidate>
+                <div className="custom-input-group">
+                  <label className="input-label">REGISTERED MOBILE NUMBER</label>
+                  <div className={`input-wrapper ${error ? 'input-error-border' : ''}`}>
+                    <FaMobileAlt className="field-icon" />
+                    <input
+                      type="tel"
+                      placeholder="Enter your registered mobile"
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value)}
+                      className="main-input"
+                      disabled={loading}
+                    />
+                  </div>
+                  {error && <span className="compulsion-msg">{error}</span>}
+                </div>
+
+                <button type="submit" className="action-submit-btn" disabled={loading}>
+                  {loading ? 'Sending OTP...' : 'Sign In'} <FaChevronRight className="btn-arrow" />
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="form-header">
+                <h2>Verify OTP</h2>
+                <p>Enter the code sent to <strong>{mobile}</strong></p>
+              </div>
+
+              <form onSubmit={handleVerifyOtp} noValidate>
+                <div className="custom-input-group">
+                  <label className="input-label">OTP</label>
+                  <div className={`input-wrapper ${otpError ? 'input-error-border' : ''}`}>
+                    <FaMobileAlt className="field-icon" />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="Enter 6-digit OTP"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                      className="main-input"
+                      disabled={otpLoading}
+                    />
+                  </div>
+                  {otpError && <span className="compulsion-msg">{otpError}</span>}
+                </div>
+
+                <button type="submit" className="action-submit-btn" disabled={otpLoading}>
+                  {otpLoading ? 'Verifying...' : 'Verify OTP'} <FaChevronRight className="btn-arrow" />
+                </button>
+              </form>
+
+              <div className="otp-helper-row">
+                <button type="button" className="otp-link-btn" onClick={handleChangeNumber} disabled={otpLoading}>
+                  Change number
+                </button>
+                <button
+                  type="button"
+                  className="otp-link-btn"
+                  onClick={handleResendOtp}
+                  disabled={otpLoading || resendCooldown > 0}
+                >
+                  {resendCooldown > 0 ? `Resend OTP (${resendCooldown}s)` : 'Resend OTP'}
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="security-notice">
             🔒 Secured connection. Unauthorized access is strictly logged.
