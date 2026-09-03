@@ -14,17 +14,17 @@ import {
 } from '@mui/icons-material';
 
 // Asset Imports
-import catalogFile1 from './Digital_Bohemia_Catalog.pdf';
-import catalogFile2 from './Duro_Catalogue.pdf';
-import catalogFile3 from './Dyed_Veneers_catalogue.pdf';
-import catalogFile4 from './Kohinoor_of_Veneers_digital.pdf';
-import catalogFile5 from './MASTERPIECE_2026.pdf';
-
 import image1 from './image1.jpeg'; 
 import image2 from './image2.jpeg';
 import image3 from './image3.jpeg';
 import image4 from './image4.jpeg';
 import image5 from './image5.jpeg';
+
+// Catalog PDFs live in the public Supabase Storage bucket "Catalog_pdf" instead of
+// this folder, so they are not bundled into the production build.
+const CATALOG_BUCKET_URL = `${process.env.REACT_APP_SUPABASE_URL}/storage/v1/object/public/Catalog_pdf`;
+
+const catalogUrl = (fileName) => `${CATALOG_BUCKET_URL}/${encodeURIComponent(fileName)}`;
 
 //  LIGHT LUXURY SHOWROOM THEME
 
@@ -80,7 +80,7 @@ export default function CatalogShowcase() {
       category: 'Premium Veneers', 
       size: '7.77 MB', 
       version: 'v1.1', 
-      fileAsset: catalogFile1, 
+      fileAsset: catalogUrl('MASTERPIECE VENEERS (1).pdf'), 
       imageAsset: image1,
       description: 'Comprehensive architectural layouts, premium color palettes, and structural wood veneer matrices.',
     },
@@ -91,7 +91,7 @@ export default function CatalogShowcase() {
       category: 'Eco Certified', 
       size: '18.6 MB', 
       version: 'v1.2', 
-      fileAsset: catalogFile2, 
+      fileAsset: catalogUrl('KOHINOOR OF VENEERS.pdf'), 
       imageAsset: image2,
       description: 'Eco-certified compliance layouts, tracking, and structural high-grade materials catalog.',
     },
@@ -102,7 +102,7 @@ export default function CatalogShowcase() {
       category: 'Treated Surfaces', 
       size: '4.62 MB', 
       version: 'v1.3', 
-      fileAsset: catalogFile3, 
+      fileAsset: catalogUrl('DYED VENEERS.pdf'), 
       imageAsset: image3,
       description: 'Technical grading charts, moisture resistance indices, and pristine treated finish guides.',
     },
@@ -113,7 +113,7 @@ export default function CatalogShowcase() {
       category: 'High Density', 
       size: '50.0 MB', 
       version: 'v1.4', 
-      fileAsset: catalogFile4, 
+      fileAsset: catalogUrl('PRODUCT RANGE.pdf'), 
       imageAsset: image4,
       description: 'High-density spatial design metrics, zoning layouts, and elite material surface configurations.',
     },
@@ -124,7 +124,7 @@ export default function CatalogShowcase() {
       category: 'Smart Systems', 
       size: '22.1 MB', 
       version: 'v1.5', 
-      fileAsset: catalogFile5, 
+      fileAsset: catalogUrl('BOHEMIA VENEERS.pdf'), 
       imageAsset: image5,
       description: 'Smart infrastructure asset schematics, advanced telemetry routing, and system integrations.',
     }
@@ -264,7 +264,7 @@ export default function CatalogShowcase() {
 
                     <Button
                       component="a"
-                      href={catalog.fileAsset}
+                      href={`${catalog.fileAsset}?download=${encodeURIComponent(`${catalog.title}.pdf`)}`}
                       download={`${catalog.title}.pdf`}
                       variant="outlined"
                       fullWidth
