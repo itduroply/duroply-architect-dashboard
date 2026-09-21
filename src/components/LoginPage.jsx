@@ -1,16 +1,43 @@
-// src/components/LoginPage.jsx
 import React, { useState, useEffect } from 'react';
-import { FaMobileAlt, FaUserTie, FaChevronRight, FaExclamationTriangle, FaTimes } from 'react-icons/fa';
-import { supabase } from '../supabaseClient'; 
-import duroplyLogo from './image8.png'; 
+import { TbDeviceMobile, TbLock, TbArrowRight, TbShieldCheck, TbAlertTriangle, TbX,} from 'react-icons/tb';
+import { supabase } from '../supabaseClient';
+import duroplyLogo from '../assets/duroply-logo.png';
 import './LoginStyles.css';
 
+// Presentational only. One pair is picked at mount and stays for the session.
+// Add or edit lines here to change what the left panel shows.
+const DESIGN_QUOTES = [
+  {
+    line: 'Every space begins as a drawing.',
+    
+  },
+  // {
+  //   line: 'A plan is a decision, drawn.',
+  //   sub: 'What it is built from decides how long it holds.',
+  // },
+  // {
+  //   line: 'Detail is where a design is judged.',
+  //   sub: 'So is the material behind it.',
+  // },
+  // {
+  //   line: 'Every space begins as a drawing.',
+  //   sub: 'The rest follows from the choices you make.',
+  // },
+  // {
+  //   line: 'Every surface carries a signature.',
+  //   sub: 'Yours, long after the site is handed over.',
+  // },
+];
+
+ const pickQuote = () => DESIGN_QUOTES[Math.floor(Math.random() * DESIGN_QUOTES.length)];
+
 const LoginPage = ({ onLoginSuccess }) => {
+  // Chosen once on mount; never updated, so no re-render is triggered by it.
+  const [quote] = useState(pickQuote);
   const [mobile, setMobile] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  // Tracks why access was blocked: 'not_registered' or 'ineligible'
   const [denialReason, setDenialReason] = useState('');
 
   // OTP step state
@@ -157,51 +184,40 @@ const LoginPage = ({ onLoginSuccess }) => {
 
   return (
     <div className="full-page-wrapper">
-      <div className="split-container">
-        <div className="left-brand-pane">
-          <div className="brand-overlay-content">
-            <div className="brand-badge">
-              <span className="badge-text">D+</span>
-            </div>
-            <div className="architect-carving-card">
-              <div className="carving-symbol-wrapper">
-                <FaUserTie className="carving-icon" />
-              </div>
-              <h1 className="carving-main-title">Duroply Architect</h1>
-              <p className="carving-sub-title">Program Info View</p>
-            </div>
-            <ul className="feature-list">
-              <li><span className="bullet">▪</span> Auto-validation registry module</li>
-              <li><span className="bullet">▪</span> Live premium architect dashboard access</li>
-              <li><span className="bullet">▪</span> Tier-based program analytic tracking</li>
-              <li><span className="bullet">▪</span> Instant project credentials processing</li>
-            </ul>
+      <div className="login-stage">
+        <div className="brand-masthead">
+          <div className="masthead-wordmark">
+            DESIGN PARTNER<span className="wordmark-plus">+</span>
           </div>
-          <div className="pane-footer">
-            © 2026 DUROPLY INDUSTRIES LTD. • v4.0
-          </div>
+          <div className="masthead-tagline">FOR ARCHITECTS AND INTERIOR DESIGNERS</div>
+          {/* <p className="masthead-statement">
+            A recognition dimension for architects and interior designers, through a platform
+            that acknowledges their design and work.
+          </p> */}
         </div>
 
-        <div className="right-form-pane">
+        <div className="glass-card-3d">
           <div className="top-logo-row">
-            <img src={duroplyLogo} alt="Duroply Logo" className="brand-logo-img" />
+            <img src={duroplyLogo} alt="Duroply" className="brand-logo-img" />
           </div>
 
           {step === 'mobile' ? (
             <>
               <div className="form-header">
                 <h2>Welcome back</h2>
-                <p>Sign in to access your secure architect portal</p>
+                {/* <p>Sign in with the mobile number registered with your Duro representative.</p> */}
               </div>
 
               <form onSubmit={handleSignIn} noValidate>
                 <div className="custom-input-group">
                   <label className="input-label">REGISTERED MOBILE NUMBER</label>
                   <div className={`input-wrapper ${error ? 'input-error-border' : ''}`}>
-                    <FaMobileAlt className="field-icon" />
+                    <TbDeviceMobile className="field-icon" />
+                    <span className="field-divider" aria-hidden="true"></span>
+                    <span className="field-prefix">+91</span>
                     <input
                       type="tel"
-                      placeholder="Enter your registered mobile"
+                      placeholder="Enter your mobile number"
                       value={mobile}
                       onChange={(e) => setMobile(e.target.value)}
                       className="main-input"
@@ -212,7 +228,9 @@ const LoginPage = ({ onLoginSuccess }) => {
                 </div>
 
                 <button type="submit" className="action-submit-btn" disabled={loading}>
-                  {loading ? 'Sending OTP...' : 'Sign In'} <FaChevronRight className="btn-arrow" />
+                  <TbLock className="btn-lead-icon" />
+                  {loading ? 'Sending one-time password...' : 'Send one-time password'}
+                  <TbArrowRight className="btn-arrow" />
                 </button>
               </form>
             </>
@@ -225,9 +243,10 @@ const LoginPage = ({ onLoginSuccess }) => {
 
               <form onSubmit={handleVerifyOtp} noValidate>
                 <div className="custom-input-group">
-                  <label className="input-label">OTP</label>
+                  <label className="input-label">ONE-TIME PASSWORD</label>
                   <div className={`input-wrapper ${otpError ? 'input-error-border' : ''}`}>
-                    <FaMobileAlt className="field-icon" />
+                    <TbLock className="field-icon" />
+                    <span className="field-divider" aria-hidden="true"></span>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -235,7 +254,7 @@ const LoginPage = ({ onLoginSuccess }) => {
                       placeholder="Enter 6-digit OTP"
                       value={otp}
                       onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                      className="main-input"
+                      className="main-input otp-input"
                       disabled={otpLoading}
                     />
                   </div>
@@ -243,7 +262,9 @@ const LoginPage = ({ onLoginSuccess }) => {
                 </div>
 
                 <button type="submit" className="action-submit-btn" disabled={otpLoading}>
-                  {otpLoading ? 'Verifying...' : 'Verify OTP'} <FaChevronRight className="btn-arrow" />
+                  <TbShieldCheck className="btn-lead-icon" />
+                  {otpLoading ? 'Verifying...' : 'Verify OTP'}
+                  <TbArrowRight className="btn-arrow" />
                 </button>
               </form>
 
@@ -264,19 +285,34 @@ const LoginPage = ({ onLoginSuccess }) => {
           )}
 
           <div className="security-notice">
-            🔒 Secured connection. Unauthorized access is strictly logged.
+            <TbShieldCheck className="notice-icon" />
+            Secure sign-in. No password needed.
+          </div>
+
+          {/* {step === 'mobile' && (
+            <div className="enrol-note">
+              Not enrolled yet? Speak to your Duro representative, or{' '}
+              <span className="enrol-link">write to us</span>.
+            </div>
+          )} */}
+
+          <div className="card-quote">
+            <div className="card-quote-line">&ldquo;{quote.line}&rdquo;</div>
+            <div className="card-quote-sub">{quote.sub}</div>
           </div>
         </div>
+
+        <div className="stage-footer">© 2026 DUROPLY INDUSTRIES LTD.</div>
       </div>
 
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-container warning-modal">
             <button className="modal-close-btn" onClick={() => setShowModal(false)}>
-              <FaTimes />
+              <TbX />
             </button>
             <div className="modal-icon-wrapper">
-              <FaExclamationTriangle className="modal-warning-icon" />
+              <TbAlertTriangle className="modal-warning-icon" />
             </div>
             <h3 className="modal-title">Access Denied</h3>
             
