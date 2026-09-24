@@ -8,7 +8,7 @@ import './LoginStyles.css';
 // Add or edit lines here to change what the left panel shows.
 const DESIGN_QUOTES = [
   {
-    line: 'Every space begins as a drawing.',
+    line: 'Every space design with you.',
     
   },
   // {
