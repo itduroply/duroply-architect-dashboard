@@ -42,37 +42,46 @@ async function sendOTP(phone: string, otp: string): Promise<boolean> {
   }
 
   try {
+    // Must match the DLT-registered template text exactly, or the operator drops the SMS.
     const message = `Your Duroply Architect Portal verification code is ${otp}. This code will expire in 10 minutes. - Team DUROPLY`;
+
+    // Pinnacle expects international format without '+', e.g. 918123456789
+    const digits = phone.replace(/\D/g, '');
+    const number = digits.length === 10 ? `91${digits}` : digits;
 
     const response = await fetch(pinnacleApiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        version: "1.0",
-        accesskey: pinnacleAccessKey,
-        messages: [
-          {
-            dest: [phone],
-            msg: message,
-            type: "PM",
-            header: pinnacleHeader,
-            app_country: "1",
-            country_cd: "91",
-            dlt_entity_id: pinnacleDltEntityId,
-            dlt_template_id: pinnacleDltTemplateId
-          }
-        ]
+      headers: {
+        'apikey': pinnacleAccessKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        sender: pinnacleHeader,
+        numbers: number,
+        message,
+        messagetype: 'TXT',
+        dltentityid: pinnacleDltEntityId,
+        dlttempid: pinnacleDltTemplateId,
       }),
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Pinnacle SMS API error:', errorText);
+      console.error('Pinnacle SMS API error:', responseText);
       return false;
     }
 
-    const result = await response.json();
-    console.log(`OTP sent successfully to ${phone}. Response:`, result);
+    // Pinnacle can return HTTP 200 with an EC10xx error code in the body
+    let result: { status?: string } | null = null;
+    try { result = JSON.parse(responseText); } catch { /* non-JSON body */ }
+
+    if (!result || String(result.status).toLowerCase() !== 'success') {
+      console.error('Pinnacle SMS API rejected request:', responseText);
+      return false;
+    }
+
+    console.log(`OTP sent successfully to ${number}. Response:`, result);
     return true;
   } catch (error) {
     console.error('Error sending OTP:', error);

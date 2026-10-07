@@ -7,6 +7,59 @@ import {  Box,  Typography,  Button,  Card,  CardContent,  Table,  TableBody,  T
   Stack, FormControl,  InputLabel,  Select,  MenuItem,  Alert,} from '@mui/material';
 import {  AccountBalanceWallet,  CheckCircle,  AccessTime,  GetApp,  Close,  ArrowForward,  Security,  NotificationsActive, InfoOutlined} from '@mui/icons-material';
 
+// Remittance rows come from the admin app and Excel imports, so the account
+// number column and status casing are not reliable. Match the way the admin
+// app does: account number column, or the account number at the start of
+// architect_name ("<account> | <name>"), and status case-insensitively.
+// Remittances linked to the architect's payout requests are matched by
+// transaction_id as well, the same link the admin Payout page uses.
+const remittanceAccountFilter = (accountNumber, payoutIds = []) => {
+  const filters = [`account_number.eq.${accountNumber}`, `architect_name.ilike.${accountNumber}*`];
+  if (payoutIds.length > 0) filters.push(`transaction_id.in.(${payoutIds.join(',')})`);
+  return filters.join(',');
+};
+
+const isRemittanceStatus = (item, status) =>
+  String(item.status || '').trim().toLowerCase() === status;
+
+// payout_request is what takes money out of the balance. Same staging as the
+// admin Payout page: a request is settled once its linked remittance
+// (remittances.transaction_id = payout_request.id) is Paid; until then it is
+// in progress, whether still in Queue or already Made. Remittances not linked
+// to any payout request (direct entries) are counted on their own.
+const computePayoutTotals = (payouts, remits) => {
+  const remitByPayoutId = new Map();
+  remits.forEach(r => {
+    if (r.transaction_id !== null && r.transaction_id !== undefined) {
+      remitByPayoutId.set(String(r.transaction_id), r);
+    }
+  });
+  const payoutIds = new Set(payouts.map(p => String(p.id)));
+
+  let settled = 0;
+  let inProgress = 0;
+  const payoutsWithoutRemittance = [];
+
+  payouts.forEach(p => {
+    const linked = remitByPayoutId.get(String(p.id));
+    if (linked && isRemittanceStatus(linked, 'paid')) {
+      settled += Number(linked.amount ?? p.payout_amount ?? 0);
+    } else {
+      inProgress += Number(p.payout_amount || 0);
+      if (!linked) payoutsWithoutRemittance.push(p);
+    }
+  });
+
+  remits
+    .filter(r => !payoutIds.has(String(r.transaction_id)))
+    .forEach(r => {
+      if (isRemittanceStatus(r, 'paid')) settled += Number(r.amount || 0);
+      else if (isRemittanceStatus(r, 'pending')) inProgress += Number(r.amount || 0);
+    });
+
+  return { settled, inProgress, payoutsWithoutRemittance };
+};
+
 export default function Analytics({ account_number }) {
   const [remittances, setRemittances] = useState([]);
   const [ledgerData, setLedgerData] = useState([]);
@@ -64,31 +117,33 @@ export default function Analytics({ account_number }) {
   const fetchAnalyticsData = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Fetch remittances along with transaction_id
-      const { data: remittanceData, error: remError } = await supabase
-        .from('remittances')
-        .select('id, architect_name, utr, status, amount, payment_mode, done_payment_date, transaction_id, created_at')
-        .eq('account_number', account_number);
-
-      if (remError) throw remError;
-      setRemittances(remittanceData || []);
-
-      // 2. Fetch commission ledger
-      const { data: ledgerRows, error: ledError } = await supabase
-        .from('commission_ledger')
-        .select('lead_id, claim_date, claim_no, total_payout_amount, architect_name')
-        .order('claim_date', { ascending: true });
-
-      if (ledError) throw ledError;
-      setLedgerData(ledgerRows || []);
-
-      // 3. Fetch payout_request along with id
+      // 1. Fetch payout_request along with id (needed to link remittances)
       const { data: payoutData, error: payError } = await supabase
         .from('payout_request')
         .select('id, architect_name, payout_amount, status, created_at')
         .eq('account_identity', account_number);
 
       if (payError) throw payError;
+
+      // 2. Fetch remittances along with transaction_id
+      const { data: remittanceData, error: remError } = await supabase
+        .from('remittances')
+        .select('id, architect_name, utr, status, amount, payment_mode, done_payment_date, transaction_id, created_at')
+        .or(remittanceAccountFilter(account_number, (payoutData || []).map(p => p.id)));
+
+      if (remError) throw remError;
+      setRemittances(remittanceData || []);
+
+      // 3. Fetch commission ledger
+      const { data: ledgerRows, error: ledError } = await supabase
+        .from('commission_ledger')
+        .select('lead_id, claim_date, claim_no, total_payout_amount, architect_name')
+        .ilike('architect_name', `${account_number}%`)
+        .order('claim_date', { ascending: true });
+
+      if (ledError) throw ledError;
+      setLedgerData(ledgerRows || []);
+
       setPayoutRequests(payoutData || []);
     } catch (error) {
       showToast(error.message || 'Error pulling cloud matrix metrics', 'error');
@@ -109,22 +164,9 @@ export default function Analytics({ account_number }) {
       .filter(item => item.architect_name && item.architect_name.includes(account_number))
       .reduce((sum, item) => sum + Number(item.total_payout_amount || 0), 0);
 
-    const totalPaidOut = remittances
-      .filter(item => item.status === 'Paid')
-      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-    // 1. Requests pending in payout_request Queue (Not yet processed by admin)
-    const pendingPayoutRequestsSum = payoutRequests
-      .filter(item => item.status === 'Queue')
-      .reduce((sum, item) => sum + Number(item.payout_amount || 0), 0);
-
-    // 2. Requests converted to ledger entry and currently pending in remittances table
-    const pendingRemittancesSum = remittances
-      .filter(item => item.status === 'Pending')
-      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-    // Total pending balance under process
-    const totalPending = pendingPayoutRequestsSum + pendingRemittancesSum;
+    // Every payout request reduces the balance: settled once its remittance is
+    // Paid, in progress while it is in Queue or Made.
+    const { settled: totalPaidOut, inProgress: totalPending } = computePayoutTotals(payoutRequests, remittances);
 
     const netAvailableBalance = totalEarned - totalPaidOut - totalPending;
 
@@ -177,7 +219,7 @@ export default function Analytics({ account_number }) {
     });
 
     // 2. Process Disbursements
-    const filteredPaid = remittances.filter(item => item.status === 'Paid');
+    const filteredPaid = remittances.filter(item => isRemittanceStatus(item, 'paid'));
     filteredPaid.forEach(item => {
       const date = item.done_payment_date || 'Unspecified Date';
       list.push({
@@ -189,7 +231,8 @@ export default function Analytics({ account_number }) {
     });
 
     // 3. Process Transactions In Progress for Transaction History View
-    const pendingPayouts = payoutRequests.filter(item => item.status === 'Queue');
+    // Payout requests with no remittance yet (Queue, or Made without a linked row)
+    const { payoutsWithoutRemittance: pendingPayouts } = computePayoutTotals(payoutRequests, remittances);
     pendingPayouts.forEach(item => {
       list.push({
         // A payout request is a claim raised by the architect; show when it was raised.
@@ -200,7 +243,7 @@ export default function Analytics({ account_number }) {
       });
     });
 
-    const pendingRemittances = remittances.filter(item => item.status === 'Pending');
+    const pendingRemittances = remittances.filter(item => isRemittanceStatus(item, 'pending'));
     pendingRemittances.forEach(item => {
       list.push({
         date: item.created_at || 'Unspecified Date',
@@ -224,9 +267,8 @@ export default function Analytics({ account_number }) {
 
   const targetViewDataset = useMemo(() => {
     if (activeTab === 'Pending') {
-      // Items in Queue state in payout_request table
-      const underProcessQueueItems = payoutRequests
-        .filter(item => item.status === 'Queue')
+      // Payout requests with no remittance yet (Queue, or Made without a linked row)
+      const underProcessQueueItems = computePayoutTotals(payoutRequests, remittances).payoutsWithoutRemittance
         .map(item => ({
           id: item.id || 'REQ',
           utr: 'Awaiting Verification',
@@ -238,7 +280,7 @@ export default function Analytics({ account_number }) {
 
       // Items in Pending state in remittances table
       const remittancePendingItems = remittances
-        .filter(item => item.status === 'Pending')
+        .filter(item => isRemittanceStatus(item, 'pending'))
         .map(item => ({
           id: item.id,
           utr: item.utr || 'Awaiting Allocation',
@@ -252,7 +294,7 @@ export default function Analytics({ account_number }) {
     }
 
     if (activeTab === 'Paid') {
-      return remittances.filter(item => item.status === 'Paid');
+      return remittances.filter(item => isRemittanceStatus(item, 'paid'));
     }
 
     return [];
@@ -303,15 +345,16 @@ export default function Analytics({ account_number }) {
     try {
       const { data: freshLedger, error: freshLedgErr } = await supabase
         .from('commission_ledger')
-        .select('architect_name, total_payout_amount');
+        .select('architect_name, total_payout_amount')
+        .ilike('architect_name', `${account_number}%`);
       const { data: freshPayouts, error: freshPayErr } = await supabase
         .from('payout_request')
-        .select('payout_amount, status')
+        .select('id, payout_amount, status')
         .eq('account_identity', account_number);
       const { data: freshRemits, error: freshRemErr } = await supabase
         .from('remittances')
-        .select('amount, status')
-        .eq('account_number', account_number);
+        .select('amount, status, transaction_id')
+        .or(remittanceAccountFilter(account_number, (freshPayouts || []).map(p => p.id)));
 
       const { data: masterArchData, error: masterArchErr } = await supabase
         .from('master_architect')
@@ -319,19 +362,8 @@ export default function Analytics({ account_number }) {
         .eq('account_number', account_number);
 
       if (!freshPayErr && !freshRemErr && !freshLedgErr && !masterArchErr) {
-        const currentPaid = (freshRemits || [])
-          .filter(i => i.status === 'Paid')
-          .reduce((s, i) => s + Number(i.amount || 0), 0);
-
-        const pendingPayoutsSum = (freshPayouts || [])
-          .filter(i => i.status === 'Queue')
-          .reduce((s, i) => s + Number(i.payout_amount || 0), 0);
-
-        const pendingRemitsSum = (freshRemits || [])
-          .filter(i => i.status === 'Pending')
-          .reduce((s, i) => s + Number(i.amount || 0), 0);
-
-        const currentQueue = pendingPayoutsSum + pendingRemitsSum;
+        const { settled: currentPaid, inProgress: currentQueue } =
+          computePayoutTotals(freshPayouts || [], freshRemits || []);
 
         const currentEarned = (freshLedger || [])
           .filter(item => item.architect_name && item.architect_name.includes(account_number))
@@ -703,25 +735,153 @@ export default function Analytics({ account_number }) {
       </Box>
 
       {/* 2. Initiate Payout Button */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3, width: '100%' }}>
-        <Button 
-          variant="contained" 
-          onClick={() => setIsModalOpen(true)}
-          startIcon={<AccountBalanceWallet />}
-          sx={{ 
-            background: '#0f172a',
-            color: '#fff', 
-            textTransform: 'none', 
-            fontWeight: 700, 
-            py: 1.2, 
-            px: 3,
-            borderRadius: '6px',
-            border: '2.5px solid #FFD700',
-            boxShadow: '0 0 12px rgba(255, 215, 0, 0.4)'
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3, width: '100%' }}>
+        <Box
+          sx={{
+            position: 'relative',
+            display: 'inline-flex',
+            // Bounces in when the page opens
+            animation: 'payoutEnter 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) both',
+            // Two ripple rings that keep spreading out from the button
+            '&::before, &::after': {
+              content: '""',
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '12px',
+              border: '2px solid rgba(15, 23, 42, 0.45)',
+              animation: 'payoutRipple 2.2s ease-out infinite',
+              pointerEvents: 'none',
+            },
+            '&::after': { animationDelay: '1.1s' },
+            '@keyframes payoutEnter': {
+              '0%': { opacity: 0, transform: 'translateY(30px) scale(0.6)' },
+              '60%': { opacity: 1, transform: 'translateY(-6px) scale(1.06)' },
+              '100%': { opacity: 1, transform: 'translateY(0) scale(1)' },
+            },
+            '@keyframes payoutRipple': {
+              '0%': { transform: 'scale(1)', opacity: 0.9 },
+              '100%': { transform: 'scale(1.18, 1.45)', opacity: 0 },
+            },
+            '@media (prefers-reduced-motion: reduce)': {
+              animation: 'none',
+              '&::before, &::after': { animation: 'none', display: 'none' },
+            },
           }}
         >
-          Initiate Payout
-        </Button>
+          {/* Offer-style tag on the corner */}
+          {financialMetrics.netAvailableBalance > 0 && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: -10,
+                right: -8,
+                zIndex: 2,
+                px: 1,
+                py: 0.2,
+                borderRadius: '10px',
+                background: '#16a34a',
+                color: '#fff',
+                fontSize: '9.5px',
+                fontWeight: 800,
+                letterSpacing: '0.05em',
+                boxShadow: '0 2px 8px rgba(22, 163, 74, 0.45)',
+                animation: 'payoutTag 1.6s ease-in-out infinite',
+                '@keyframes payoutTag': {
+                  '0%, 100%': { transform: 'scale(1) rotate(0deg)' },
+                  '50%': { transform: 'scale(1.12) rotate(-4deg)' },
+                },
+                '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+              }}
+            >
+              💰 READY
+            </Box>
+          )}
+
+          <Button
+            variant="contained"
+            onClick={() => setIsModalOpen(true)}
+            startIcon={<AccountBalanceWallet className="payout-wallet-icon" />}
+            endIcon={<ArrowForward className="payout-arrow-icon" />}
+            sx={{
+              position: 'relative',
+              overflow: 'hidden',
+              zIndex: 1,
+              // Moving warm gradient, like a sale banner
+              background: 'linear-gradient(110deg, #0b0b10, #1f2937, #3f3f46, #0b0b10)',
+              backgroundSize: '300% 100%',
+              color: '#fff',
+              textTransform: 'none',
+              fontWeight: 800,
+              fontSize: '15px',
+              py: 1.3,
+              px: 3.2,
+              borderRadius: '12px',
+              border: 'none',
+              boxShadow: '0 8px 22px rgba(0, 0, 0, 0.4)',
+              animation: 'payoutGradient 4s linear infinite',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+              '&:hover': {
+                background: 'linear-gradient(110deg, #0b0b10, #1f2937, #3f3f46, #0b0b10)',
+                backgroundSize: '300% 100%',
+                transform: 'translateY(-3px) scale(1.04)',
+                boxShadow: '0 12px 28px rgba(0, 0, 0, 0.5)',
+              },
+              '&:active': { transform: 'scale(0.97)' },
+              // White shine that sweeps across the button
+              '&::after': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                left: '-75%',
+                width: '45%',
+                height: '100%',
+                background: 'linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.55) 50%, transparent 100%)',
+                transform: 'skewX(-20deg)',
+                animation: 'payoutShine 2.6s ease-in-out infinite',
+                pointerEvents: 'none',
+              },
+              '& .payout-wallet-icon': {
+                animation: 'payoutWiggle 2.6s ease-in-out infinite',
+              },
+              '& .payout-arrow-icon': {
+                animation: 'payoutArrow 1.2s ease-in-out infinite',
+              },
+              '@keyframes payoutGradient': {
+                '0%': { backgroundPosition: '0% 50%' },
+                '100%': { backgroundPosition: '300% 50%' },
+              },
+              '@keyframes payoutShine': {
+                '0%': { left: '-75%' },
+                '55%, 100%': { left: '130%' },
+              },
+              '@keyframes payoutWiggle': {
+                '0%, 75%, 100%': { transform: 'rotate(0deg) scale(1)' },
+                '80%': { transform: 'rotate(-16deg) scale(1.15)' },
+                '85%': { transform: 'rotate(14deg) scale(1.15)' },
+                '90%': { transform: 'rotate(-8deg) scale(1.1)' },
+                '95%': { transform: 'rotate(4deg) scale(1)' },
+              },
+              '@keyframes payoutArrow': {
+                '0%, 100%': { transform: 'translateX(0)' },
+                '50%': { transform: 'translateX(5px)' },
+              },
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+                '&::after': { animation: 'none', display: 'none' },
+                '& .payout-wallet-icon, & .payout-arrow-icon': { animation: 'none' },
+              },
+            }}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15 }}>
+              <span>Initiate Payout</span>
+              {financialMetrics.netAvailableBalance > 0 && (
+                <Typography component="span" sx={{ fontSize: '11px', fontWeight: 700, color: '#FFF7D6', letterSpacing: '0.02em' }}>
+                  ₹{financialMetrics.netAvailableBalance.toLocaleString('en-IN')} ready to withdraw
+                </Typography>
+              )}
+            </Box>
+          </Button>
+        </Box>
       </Box>
 
       {/* Ledger History Core Wrapper */}

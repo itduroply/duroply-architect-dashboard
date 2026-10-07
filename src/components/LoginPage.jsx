@@ -219,7 +219,7 @@ const LoginPage = ({ onLoginSuccess }) => {
                       type="tel"
                       placeholder="Enter your mobile number"
                       value={mobile}
-                      onChange={(e) => setMobile(e.target.value)}
+                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(-10))}
                       className="main-input"
                       disabled={loading}
                     />

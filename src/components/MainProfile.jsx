@@ -176,10 +176,12 @@ const DashboardPage = ({ account_number }) => {
         const { data: remData, error: remError } = await supabase
           .from('remittances')
           .select('amount, status')
-          .eq('account_number', account_number);
-          
+          // Same matching as the payment page: account number column, or the
+          // account number at the start of architect_name; status in any case.
+          .or(`account_number.eq.${account_number},architect_name.ilike.${account_number}*`);
+
         let paidAmount = 0;
-        if (remData && !remError) remData.forEach(r => { if (r.status === 'Paid') paidAmount += (Number(r.amount) || 0); });
+        if (remData && !remError) remData.forEach(r => { if (String(r.status || '').trim().toLowerCase() === 'paid') paidAmount += (Number(r.amount) || 0); });
         const pendingAmount = computedPayout - paidAmount;
         
         setLedgerData({ architectName: resolvedName, totalSheets: computedSheets, totalPayout: computedPayout, uniqueLeadsCount: distinctLeads.size, bifurcation: taxonomy });
